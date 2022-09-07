@@ -129,6 +129,6 @@ dmypy.json
 .pyre/
 
 # user area
-.db-journal
-.sqbpro
-.env
+data/*.db-journal
+*.sqbpro
+util/*.env
