@@ -131,3 +131,4 @@ dmypy.json
 # user area
 .db-journal
 .sqbpro
+.env
