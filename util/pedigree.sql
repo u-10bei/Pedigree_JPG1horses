@@ -1,0 +1,8 @@
+CREATE TABLE `pedigree` (
+	`Id` SMALLINT(6) NOT NULL,
+	`Horse` VARCHAR(20) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`FatherId` SMALLINT(6) NULL DEFAULT NULL,
+	PRIMARY KEY (`Id`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB
