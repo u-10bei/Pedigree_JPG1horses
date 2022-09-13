@@ -38,9 +38,12 @@ window.addEventListener('load', () => {
                     },
                         min: 1,
                         max: 150,
-                    },
                 },
-            };
+            },
+            layout: {
+                hierarchical: true,
+            }
+        };
         network = new vis.Network(container, data, options);
     })
 });
