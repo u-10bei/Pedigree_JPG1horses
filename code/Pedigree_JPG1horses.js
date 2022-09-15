@@ -33,11 +33,10 @@ window.addEventListener('load', () => {
             nodes: {
                 shape: "dot",
                 scaling: {
-                    customScalingFunction: function (min, max, total, value) {
-                        return value / total;
-                    },
+                    label: {
                         min: 1,
                         max: 150,
+                    },
                 },
             },
             layout: {
