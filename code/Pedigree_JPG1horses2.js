@@ -9,7 +9,7 @@ d3.json(LINKURL)
     (LINKALL);
 
     const width = window.innerWidth;
-    const height = window.innerHeight;
+    const height = window.innerHeight * 2;
 
     const tree = (data) => {
         const root = d3.hierarchy(data);
