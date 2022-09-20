@@ -66,16 +66,18 @@ d3.json(LINKURL)
         .attr("x", d => d.children ? -5 : 5)
         .attr("dy", "0.31em")
         .attr("text-anchor", d => d.children ? "end" : "start")
-        .attr("font-size", d => d.children ? 5 : 12)
+        .attr("font-size", d => d.children ? (3 + Number(d.data.data.Power)) : 12)
         .text(d => d.data.id)
         .clone(true)
         .lower()
         .attr("stroke", "white");
     
+        console.log(root.descendants())
+
         node
         .append("circle")
         .attr("fill", "#999")
-        .attr("r", 3);
+        .attr("r", d => d.data.data.value);
    
     function zoomed(event) {
         const { transform } = event;
