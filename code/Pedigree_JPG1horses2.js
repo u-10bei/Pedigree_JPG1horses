@@ -4,8 +4,8 @@ const LINKURL = 'https://hogehoge/PHP/StratifyLink.php'
 d3.json(LINKURL)
 .then(function(LINKALL){
     const data_h = d3.stratify()
-    .id(function(d) { return d.From; })
-    .parentId(function(d) { return d.To; })
+    .id(function(d) { return d.Horse; })
+    .parentId(function(d) { return d.Father; })
     (LINKALL);
 
     const width = window.innerWidth;
@@ -21,6 +21,15 @@ d3.json(LINKURL)
     const root = tree(data_h);
 
     const zoom = d3.zoom().scaleExtent([0.5, 10]).on("zoom", zoomed);
+
+    const tooltip = d3.select("#mychart")
+    .append("div")
+    .style("position", "absolute")
+    .style("text-align", "left")
+    .style("background", "#ffffff")
+    .style("border", "1px solid #000000")
+    .style("padding", "10px")
+    .style("opacity", 0)
 
     const svg = d3.select("#mychart")
     .append("svg")
@@ -66,18 +75,30 @@ d3.json(LINKURL)
         .attr("x", d => d.children ? -5 : 5)
         .attr("dy", "0.31em")
         .attr("text-anchor", d => d.children ? "end" : "start")
-        .attr("font-size", d => d.children ? (3 + Number(d.data.data.Power)) : 12)
+        .attr("font-size", d => d.children ? (3 + Number(d.data.data.Child) + 1) : 12)
         .text(d => d.data.id)
         .clone(true)
         .lower()
-        .attr("stroke", "white");
-    
-        console.log(root.descendants())
+        .attr("stroke", "white")
 
         node
         .append("circle")
         .attr("fill", "#999")
-        .attr("r", d => d.data.data.Value);
+        .attr("r", d => Number(d.data.data.Win) + 1)
+        .on("mouseover", function (e) {
+            const d = e.target.__data__;
+            tooltip
+            .style("top", (e.target.pageY - 20) + "px")
+            .style("left", (e.target.pageX + 10) + "px")
+            .style("opacity", 1)
+            .html(" Name: " + d.data.id +
+            "<br> Child: " + (d.data.data.Child) + 
+            "<br> G1Win:" + (d.data.data.Win));
+        })            
+        .on("mouseout", function (e) {
+            tooltip
+            .style("opacity", 0);
+        });
    
     function zoomed(event) {
         const { transform } = event;
