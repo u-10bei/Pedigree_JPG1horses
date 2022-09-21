@@ -77,6 +77,20 @@ d3.json(LINKURL)
         .attr("text-anchor", d => d.children ? "end" : "start")
         .attr("font-size", d => d.children ? (3 + Number(d.data.data.Child) + 1) : 12)
         .text(d => d.data.id)
+        .on("mouseover", function (e) {
+            const d = e.target.__data__;
+            tooltip
+            .style("top", (e.target.pageY - 20) + "px")
+            .style("left", (e.target.pageX + 10) + "px")
+            .style("opacity", 1)
+            .html(" Name: " + d.data.id +
+            "<br> Child: " + (d.data.data.Child) + 
+            "<br> G1Win:" + (d.data.data.Win));
+        })            
+        .on("mouseout", function (e) {
+            tooltip
+            .style("opacity", 0);
+        })
         .clone(true)
         .lower()
         .attr("stroke", "white")
