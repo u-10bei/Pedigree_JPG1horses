@@ -17,6 +17,7 @@ MIN_BIRTH_YEAR = 1600
 MIN_RACE_AGE = 2
 
 COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
+QID_PATTERN = re.compile(r"^Q\d+$")
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,15 @@ def _check_horses(ds: Dataset) -> list[Issue]:
             issues.append(
                 Issue("pedigree.csv", f"{h.name}（Id {h.id}）: 父 Id {h.father_id} が存在しません")
             )
+
+    for h in ds.horses.values():
+        if h.wikidata is not None and not QID_PATTERN.match(h.wikidata):
+            issues.append(Issue("pedigree.csv", f"{h.name}: Wikidata 欄「{h.wikidata}」は Q 番号ではありません"))
+    qids = Counter(h.wikidata for h in ds.horses.values() if h.wikidata)
+    for qid, count in sorted(qids.items()):
+        if count > 1:
+            names = sorted(h.name for h in ds.horses.values() if h.wikidata == qid)
+            issues.append(Issue("pedigree.csv", f"Wikidata {qid} が複数の馬（{'・'.join(names)}）に付いています"))
 
     counts = Counter(h.name for h in ds.horses.values())
     for name, count in sorted(counts.items()):

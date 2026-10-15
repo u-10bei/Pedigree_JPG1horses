@@ -100,6 +100,18 @@ class Wikidata:
                 self._by_id.setdefault(q, None)
         return {q: self._by_id.get(q) for q in qids}
 
+    def search(self, name: str) -> list[Entity]:
+        """名前で検索した馬のエンティティ（同名の馬が複数いれば複数）。"""
+        qids: list[str] = []
+        for lang in ("ja", "en"):
+            data = self.client.get_json(
+                API,
+                {"action": "wbsearchentities", "search": name, "language": lang, "uselang": lang,
+                 "type": "item", "limit": "20", "format": "json"},
+            )
+            qids += [r["id"] for r in data.get("search", []) if r["id"] not in qids]
+        return [e for e in self.by_ids(qids).values() if e is not None and e.is_horse]
+
     def by_titles(self, titles: list[str], site: str = "jawiki") -> list[tuple[str | None, Entity]]:
         """記事名から馬のエンティティを引く。(実際の記事名, エンティティ) の一覧を返す。
 

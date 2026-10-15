@@ -154,6 +154,7 @@ def fetch_horses(
             "Horse": name,
             "AltNames": "|".join(alt),
             "Father": "",
+            "FatherQid": "",
             "BirthYear": str(entity.birth_year or ""),
             "Source": WIKIDATA + entity.qid,
         }
@@ -203,6 +204,7 @@ def fetch_horses(
             if father is None:
                 continue
             father_of[child.qid] = father.qid
+            rows[child.qid]["FatherQid"] = father.qid
             hit = existing_for(father)
             if hit is not None:
                 names_by_qid[father.qid] = hit.name
@@ -244,12 +246,40 @@ def fetch_horses(
     log(f"表記：英字 {sum(1 for n in renamed.values() if n.isascii())} 頭 / カナのまま {len(entities) - len(winner_qids) - len(renamed)} 頭")
 
     # 4. 既存の馬の生年（と父の照合用の情報）
+    #    Q 番号が分かっている馬はそれで引く。名前で引いた馬は父が既存データと合うか確かめ、
+    #    合わなければ同名の別の馬を検索して、父が合うものを使う（なければ使わない）。
     if include_existing:
-        targets = {h.name: None for h in ds.horses.values() if h.id != ORIGIN_ID}
-        log(f"既存の馬の生年を検索: {len(targets)} 頭")
-        found = resolver.resolve(targets)
-        log(f"  Wikidata で見つかった馬: {len(found)} 頭")
-        fathers = wikidata.by_ids([e.father for e in found.values() if e.father])
+        known = {h.name: h.wikidata for h in ds.horses.values() if h.id != ORIGIN_ID and h.wikidata}
+        by_qid = wikidata.by_ids(list(known.values()))
+        found: dict[str, Entity] = {name: by_qid[q] for name, q in known.items() if by_qid.get(q)}
+        targets = {h.name: None for h in ds.horses.values() if h.id != ORIGIN_ID and h.name not in known}
+        log(f"既存の馬の生年を検索: {len(targets)} 頭（Q 番号で取得 {len(found)} 頭）")
+        by_name = resolver.resolve(targets)
+        by_name_horse = {h.name: h for h in ds.horses.values()}
+
+        def father_matches(horse, entity: Entity, fathers: dict[str, Entity | None]) -> bool | None:
+            expected = ds.horses.get(horse.father_id)
+            if expected is None or expected.id == ORIGIN_ID or not entity.father:
+                return None  # 照合できない
+            father = fathers.get(entity.father)
+            return father is not None and normalize(expected.name) in map(normalize, father.names)
+
+        fathers = wikidata.by_ids([e.father for e in by_name.values() if e.father])
+        replaced = 0
+        for name, entity in by_name.items():
+            horse = by_name_horse[name]
+            if father_matches(horse, entity, fathers) is False:
+                candidates = [c for c in wikidata.search(clean_name(name)) if c.qid != entity.qid]
+                cand_fathers = wikidata.by_ids([c.father for c in candidates if c.father])
+                good = [c for c in candidates if father_matches(horse, c, cand_fathers)]
+                if len(good) == 1:
+                    entity = good[0]
+                    fathers.update(cand_fathers)
+                    replaced += 1
+            found[name] = entity
+        log(f"  Wikidata で見つかった馬: {len(found)} 頭（同名の別の馬から選び直し {replaced} 頭）")
+
+        fathers.update(wikidata.by_ids([e.father for e in found.values() if e.father and e.father not in fathers]))
         for name, entity in found.items():
             if entity.qid in rows:
                 continue
@@ -258,6 +288,7 @@ def fetch_horses(
             if father is not None:
                 hit = existing_for(father)
                 rows[entity.qid]["Father"] = hit.name if hit else display_name(father, father.qid)
+                rows[entity.qid]["FatherQid"] = father.qid
 
     # 父の行を先に（確認しやすいよう、名前順）
     return sorted(rows.values(), key=lambda r: r["Horse"])
@@ -267,7 +298,7 @@ def write_horses(rows: list[dict[str, str]], staging_dir: Path) -> Path:
     path = staging_dir / HORSES_RAW_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["Horse", "AltNames", "Father", "BirthYear", "Source"], lineterminator="\n")
+        writer = csv.DictWriter(f, fieldnames=["Horse", "AltNames", "Father", "FatherQid", "BirthYear", "Source"], lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     return path

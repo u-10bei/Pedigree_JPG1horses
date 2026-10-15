@@ -21,14 +21,15 @@ MariaDB + PHP + D3.js 構成を、Python + CSV + 静的サイト（GitHub Pages�
 
 | ファイル | 列 | 備考 |
 |---|---|---|
-| `pedigree.csv` | `Id, Horse, FatherId, BirthYear` | Id 0 は三大始祖をまとめる仮想ルート `__origin__`。`BirthYear` は空欄可 |
+| `pedigree.csv` | `Id, Horse, FatherId, BirthYear, Wikidata` | Id 0 は三大始祖をまとめる仮想ルート `__origin__`。`BirthYear`・`Wikidata`（Q 番号）は空欄可。同名の別の馬は `Pharamond (1925)` のように生年を付けて区別する |
 | `race_winner.csv` | `Ryear, Rtitle, WinnerId` | 同着に対応するため (年, レース, 勝ち馬) で一意 |
 | `races.csv` | `Rtitle, FirstYear, LastYear, WikiTitle` | 対象レースと対象期間。`LastYear` 空欄は継続中。`WikiTitle` は Wikipedia の記事名がレース名と異なる場合のみ |
 | `lines.csv` | `Horse, LineName, Color` | 父系の起点。各馬は自身を含む最も近い起点の系統に属する。`Color` は `#RRGGBB` または空欄 |
 
 ## 検証ルール（`python -m pedigree validate`）
 
-- 馬名が重複しない
+- 馬名が重複しない（同名の別の馬は生年を付けて区別する）
+- Wikidata の Q 番号は `Q` + 数字で、複数の馬に付いていない
 - 父 Id が存在し、循環せずに仮想ルートまでたどれる
 - 生年は空欄可。入力されている場合、父より後に生まれている
 - レース名が `races.csv` にあり、対象期間内である
