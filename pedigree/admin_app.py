@@ -14,7 +14,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from pedigree import io, merge
+from pedigree import births, io, merge
+from pedigree.lines import assign_lines
 from pedigree.models import ORIGIN_ID
 from pedigree.validate import validate
 
@@ -345,15 +346,18 @@ def add_row(row: merge.ReviewRow) -> None:
 
 
 def birth_rows(ds) -> pd.DataFrame:
-    """生年が空欄の馬の一覧。父・子の生年や初勝利から、ありうる生年の範囲を目安として出す。"""
+    """生年が空欄の馬の一覧（同じ父系の馬が続けて並ぶ順）。父・子の生年や初勝利から、ありうる生年の範囲を目安として出す。"""
     df: pd.DataFrame = st.session_state.df
-    pending = dict(zip(df.loc[df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR], "馬名"], df.loc[df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR], "生年"]))
+    is_year = df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR]
+    pending = dict(zip(df.loc[is_year, "馬名"], df.loc[is_year, "生年"]))
     children = ds.children()
+    lines = assign_lines(ds)
     first_win: dict[int, tuple[int, str]] = {}
     for w in sorted(ds.wins, key=lambda w: w.year):
         first_win.setdefault(w.winner_id, (w.year, w.race))
     records = []
-    for h in ds.horses.values():
+    for horse_id in births.lineage_order(ds):
+        h = ds.horses[horse_id]
         if h.id == ORIGIN_ID or h.birth_year is not None:
             continue
         father = ds.horses[h.father_id]
@@ -363,8 +367,10 @@ def birth_rows(ds) -> pd.DataFrame:
         if h.id in first_win:
             highs.append(first_win[h.id][0] - 2)
         high = min(highs) if highs else None
+        line = lines.get(h.id)
         records.append(
             {
+                "系統": line.name if line else "",
                 "馬名": h.name,
                 "父": father.name if father.id != ORIGIN_ID else "",
                 "父の生年": father.birth_year or "",
@@ -377,23 +383,74 @@ def birth_rows(ds) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def add_birth_years(entries: list[tuple[str, str]]) -> None:
+    """(馬名, 生年) を確認一覧に生年の行として追加する（同じ馬の生年の行があれば更新）。"""
+    for name, year in entries:
+        df: pd.DataFrame = st.session_state.df
+        same = df.index[(df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR]) & (df["馬名"] == name)]
+        if len(same):
+            df.loc[same, ["生年", "承認", "注記"]] = [year, True, "手動入力"]
+        else:
+            row = merge.ReviewRow(Approve="y", Kind=merge.KIND_BIRTH_YEAR, Horse=name, BirthYear=year, Note="手動入力")
+            st.session_state.df = pd.concat([df, to_frame([row])], ignore_index=True)
+    save_review()
+    reset_editor()
+
+
+def paste_section(ds) -> None:
+    st.subheader("まとめて貼り付け")
+    st.caption("1 行に 1 頭、「馬名 生年」の形で貼り付けてください（区切りはタブ・空白・カンマなど。「Eclipse（1764）」も可）。カナ・英字のどちらの表記でも探します。")
+    text = st.text_area("貼り付け", key="paste_births", height=140, label_visibility="collapsed")
+    if not text.strip():
+        return
+    aliases = births.load_aliases(ds, STAGING_DIR / merge.HORSES_RAW_FILE)
+    parsed = births.parse_pasted(text, ds, aliases)
+    table = birth_rows(ds).set_index("馬名")
+    preview = []
+    for p in parsed:
+        note = p.note
+        if not note and p.horse in table.index:
+            hint = table.loc[p.horse, "目安"]
+            low, _, high = str(hint).partition("〜")
+            if (low.isdigit() and p.year < int(low)) or (high.isdigit() and p.year > int(high)):
+                note = f"目安（{hint}）の範囲外です"
+        preview.append({"貼り付けた行": p.text, "対応する馬": p.horse or "", "生年": p.year or "", "注意": note})
+    st.dataframe(pd.DataFrame(preview), hide_index=True, width="stretch")
+    ok = [(p.horse, str(p.year)) for p in parsed if p.horse and p.year and not p.note]
+    if st.button(f"対応できた {len(ok)} 頭を確認一覧に追加", type="primary", disabled=not ok, key="paste_add"):
+        add_birth_years(ok)
+        st.session_state.births_msg = f"{len(ok)} 頭の生年を確認一覧に追加しました（「目安の範囲外」の行も含みます。確認タブで確かめてください）。"
+        del st.session_state["paste_births"]
+        st.rerun()
+
+
 def births_tab() -> None:
     ds = io.load(DATA_DIR)
+    message = st.session_state.pop("births_msg", None)
+    if message:
+        st.success(message)
     st.write(
-        "data/ で生年が空欄の馬です。分かる馬の「生年」を入力し、下のボタンで確認一覧に追加してください"
+        "data/ で生年が空欄の馬です。貼り付けるか、一覧の「生年」に入力して確認一覧に追加してください"
         "（反映は「確認」タブから）。「目安」は父の生年＋3 年から、子の生年－3 年・初勝利－2 年までの範囲です。"
     )
     st.caption("自動で埋められる分は、先に `python -m pedigree births` を実行すると確認一覧に入ります。")
+    paste_section(ds)
+
+    st.subheader("一覧から入力")
     table = birth_rows(ds)
     if table.empty:
         st.success("生年が空欄の馬はいません")
         return
-    only_new = st.checkbox("確認一覧にまだ生年の行がない馬だけ表示", value=True)
+    left, right = st.columns(2)
+    only_new = left.checkbox("確認一覧にまだ生年の行がない馬だけ表示", value=True)
+    line = right.selectbox("系統で絞り込む", ["すべて", *sorted({x for x in table["系統"] if x})])
     view = table[table["確認一覧の値"] == ""] if only_new else table
-    st.caption(f"空欄 {len(table)} 頭（確認一覧に生年の行あり {int((table['確認一覧の値'] != '').sum())} 頭）・表示 {len(view)} 頭")
+    if line != "すべて":
+        view = view[view["系統"] == line]
+    st.caption(f"空欄 {len(table)} 頭（確認一覧に生年の行あり {int((table['確認一覧の値'] != '').sum())} 頭）・表示 {len(view)} 頭（同じ父系の馬が続けて並びます）")
     edited = st.data_editor(
         view,
-        key=f"births-{st.session_state.editor_version}-{only_new}",
+        key=f"births-{st.session_state.editor_version}-{only_new}-{line}",
         hide_index=True,
         width="stretch",
         height=520,
@@ -406,23 +463,9 @@ def births_tab() -> None:
         if bad:
             st.error(f"生年は 4 桁の数字で入力してください：{'、'.join(bad)}")
             return
-        for name, year in zip(entered["馬名"], entered["生年"]):
-            df: pd.DataFrame = st.session_state.df
-            same = df.index[(df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR]) & (df["馬名"] == name)]
-            if len(same):
-                df.loc[same, ["生年", "承認", "注記"]] = [str(year).strip(), True, "手動入力"]
-            else:
-                st.session_state.df = pd.concat(
-                    [df, to_frame([merge.ReviewRow(Approve="y", Kind=merge.KIND_BIRTH_YEAR, Horse=name, BirthYear=str(year).strip(), Note="手動入力")])],
-                    ignore_index=True,
-                )
-        save_review()
-        reset_editor()
+        add_birth_years([(n, str(y).strip()) for n, y in zip(entered["馬名"], entered["生年"])])
         st.session_state.births_msg = f"{len(entered)} 頭の生年を確認一覧に追加しました。「確認」タブで反映してください。"
         st.rerun()
-    message = st.session_state.pop("births_msg", None)
-    if message:
-        st.success(message)
 
 
 def data_tab() -> None:

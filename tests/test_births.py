@@ -42,3 +42,23 @@ def test_add_rows_skips_horses_already_in_review():
     new = [ReviewRow(Kind="birth_year", Horse="ダービー馬", BirthYear="2001"), ReviewRow(Kind="birth_year", Horse="2歳王者", BirthYear="2001")]
     merged, added = births.add_rows(existing, new)
     assert added == 1 and [r.Horse for r in merged] == ["ダービー馬", "2歳王者"]
+
+
+def test_parse_pasted_lines():
+    data = ds()
+    pasted = "ダービー馬\t2001\n古馬, 2000\n2歳王者（2001年生）\n生年あり 1999\n生年あり 2001\nいない馬 1990\n古馬\nderby 2001"
+    results = births.parse_pasted(pasted, data, aliases={"derby": "ダービー馬"})
+    got = [(r.name, r.year, r.horse, r.note) for r in results]
+    assert got[0] == ("ダービー馬", 2001, "ダービー馬", "")
+    assert got[1] == ("古馬", 2000, "古馬", "")
+    assert got[2] == ("2歳王者", 2001, "2歳王者", "")
+    assert "異なります" in got[3][3]
+    assert "同じです" in got[4][3]
+    assert got[5][2] is None and "該当する馬がいません" in got[5][3]
+    assert got[6][1] is None and "読み取れません" in got[6][3]
+    assert got[7][2] == "ダービー馬"  # 別表記で対応付け
+
+
+def test_lineage_order_keeps_sire_lines_together():
+    order = births.lineage_order(ds())
+    assert order[0] == 0 and order[1] == 1 and set(order) == set(ds().horses)
