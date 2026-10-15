@@ -38,6 +38,7 @@ COLUMN_NAMES = {
     "Father": "父",
     "BirthYear": "生年",
     "Note": "注記",
+    "AltNames": "別表記",
 }
 
 
@@ -114,7 +115,7 @@ def review_tab() -> None:
         use_container_width=True,
         height=560,
         disabled=[c for c in view.columns if c not in EDITABLE],
-        column_order=["承認", "種別", "年", "レース", "馬名", "父", "生年", "注記", "リンク"],
+        column_order=["承認", "種別", "年", "レース", "馬名", "別表記", "父", "生年", "注記", "リンク"],
         column_config={
             "承認": st.column_config.CheckboxColumn(width="small"),
             "種別": st.column_config.TextColumn(width="small"),

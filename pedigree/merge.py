@@ -60,6 +60,7 @@ class ReviewRow:
     BirthYear: str = ""
     Note: str = ""
     Source: str = ""
+    AltNames: str = ""  # 別表記（"|" 区切り）。表記を選び直すときの参考
 
 
 REVIEW_COLUMNS = [f.name for f in fields(ReviewRow)]
@@ -170,6 +171,7 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
             Father=index.canonical(rh.father) if rh.father else "",
             BirthYear=str(rh.birth_year or ""),
             Source=rh.source,
+            AltNames="|".join(a for a in rh.alt_names if a != name),
         )
         horse_rows[name] = row
         if not rh.father:

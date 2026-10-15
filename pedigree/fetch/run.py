@@ -11,11 +11,12 @@ from ..merge import HORSES_RAW_FILE, WINNERS_RAW_FILE, RawWin, normalize
 from ..models import ORIGIN_ID, Dataset
 from .client import Client
 from .wikidata import Entity, Wikidata
-from .wikipedia import parse_infobox_father, parse_winners
+from .wikipedia import parse_infobox_country, parse_infobox_father, parse_winners
 
 JAWIKI = "jawiki:"
 WIKIDATA = "wikidata:"
 MAX_DEPTH = 40
+JAPAN = "Q17"
 
 _TRAILING_PAREN = re.compile(r"\s*[(（][^()（）]*[)）]$")
 
@@ -143,8 +144,11 @@ def fetch_horses(
     log(f"  Wikidata で見つかった馬: {len(winners)} 頭")
 
     rows: dict[str, dict[str, str]] = {}  # qid → 行
+    entities: dict[str, Entity] = {}  # qid → エンティティ（新規の馬）
+    father_of: dict[str, str] = {}  # 子の qid → 父の qid
 
     def add_row(entity: Entity, name: str, extra_names: tuple[str, ...] = ()) -> None:
+        entities[entity.qid] = entity
         alt = [n for n in dict.fromkeys((*entity.names, *extra_names)) if n != name]
         rows[entity.qid] = {
             "Horse": name,
@@ -198,6 +202,7 @@ def fetch_horses(
                     continue
             if father is None:
                 continue
+            father_of[child.qid] = father.qid
             hit = existing_for(father)
             if hit is not None:
                 names_by_qid[father.qid] = hit.name
@@ -210,7 +215,35 @@ def fetch_horses(
         log(f"  祖先 {depth + 1} 代目: 新規 {len(next_frontier)} 頭")
         frontier = next_frontier
 
-    # 3. 既存の馬の生年（と父の照合用の情報）
+    # 3. 表記：日本で登録された馬（日本の G1 勝ち馬、または日本生まれの子がいる種牡馬）はカナ、それ以外は英字
+    def born_in_japan(entity: Entity) -> bool:
+        if entity.birth_place == JAPAN:
+            return True
+        for lang, title in (("ja", entity.jawiki), ("en", entity.enwiki)):
+            if title:
+                country = parse_infobox_country(client.wikipedia_html(title, lang))
+                if country:
+                    return country.startswith("日本") or "Japan" in country
+        return False
+
+    winner_qids = {e.qid for e in winners.values()}
+    renamed: dict[str, str] = {}
+    for qid, entity in entities.items():
+        if qid in winner_qids:
+            continue
+        children = [entities[c] for c, f in father_of.items() if f == qid and c in entities]
+        registered = any(born_in_japan(c) for c in children)
+        name = display_name(entity, qid) if registered else clean_name(entity.en or entity.ja or qid)
+        old = rows[qid]["Horse"]
+        if name != old:
+            alt = [n for n in dict.fromkeys((old, *rows[qid]["AltNames"].split("|"))) if n and n != name]
+            rows[qid]["Horse"], rows[qid]["AltNames"] = name, "|".join(alt)
+            renamed[old] = name
+    for row in rows.values():
+        row["Father"] = renamed.get(row["Father"], row["Father"])
+    log(f"表記：英字 {sum(1 for n in renamed.values() if n.isascii())} 頭 / カナのまま {len(entities) - len(winner_qids) - len(renamed)} 頭")
+
+    # 4. 既存の馬の生年（と父の照合用の情報）
     if include_existing:
         targets = {h.name: None for h in ds.horses.values() if h.id != ORIGIN_ID}
         log(f"既存の馬の生年を検索: {len(targets)} 頭")
