@@ -159,11 +159,12 @@ def test_manual_registered_horse_sets_birth_year_only(dirs):
     assert any("すでに登録されています" in w.value for w in at.warning)
     assert not any(r.Horse == "サンデーサイレンス" for r in merge.read_review(staging / merge.REVIEW_FILE))
 
+    # 登録済みの生年と違う値を入力すると、生年の行だけが追加される（data/ の内容に左右されないよう 1900 を使う）
     next(t for t in at.text_input if t.label == "馬名").input("サンデーサイレンス")
-    next(t for t in at.text_input if t.label == "生年（空欄可）").input("1986")
+    next(t for t in at.text_input if t.label == "生年（空欄可）").input("1900")
     submit_horse(at, None, "Halo")
     added = [r for r in merge.read_review(staging / merge.REVIEW_FILE) if r.Horse == "サンデーサイレンス"]
-    assert [(r.Kind, r.BirthYear, r.Approve) for r in added] == [("birth_year", "1986", "y")]
+    assert [(r.Kind, r.BirthYear, r.Approve) for r in added] == [("birth_year", "1900", "y")]
 
 
 def test_marked_rows_are_removed_from_review(dirs):
