@@ -8,6 +8,7 @@
     python -m pedigree add horse 馬名 --father 父 [--birth 生年]   馬を 1 頭追加する
     python -m pedigree add win 年 レース 馬名                      勝利を 1 件追加する
     python -m pedigree admin      確認画面（Streamlit）を開く
+    python -m pedigree build      階層図用の site/data/pedigree.json を作る
 """
 
 from __future__ import annotations
@@ -94,7 +95,7 @@ def cmd_admin(args: argparse.Namespace) -> int:
     import subprocess
 
     app = Path(__file__).with_name("admin_app.py")
-    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app), *args.streamlit_args])
+    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app), *args.extra])
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
@@ -112,6 +113,19 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         rows = run.fetch_horses(ds, client, raw_wins, include_existing=not args.no_existing)
         path = run.write_horses(rows, args.staging_dir)
         print(f"{path}: {len(rows)} 頭")
+    return 0
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    from . import build
+
+    ds = io.load(args.data_dir)
+    issues = validate(ds)
+    if issues:
+        for issue in issues:
+            print(f"ERROR {issue}", file=sys.stderr)
+        return 1
+    print(f"{build.write(ds, args.output)}")
     return 0
 
 
@@ -143,10 +157,15 @@ def main(argv: list[str] | None = None) -> int:
     p_add_win.add_argument("race")
     p_add_win.add_argument("name")
     p_add.set_defaults(func=cmd_add)
-    p_admin = sub.add_parser("admin", help="確認画面（Streamlit）を開く")
-    p_admin.add_argument("streamlit_args", nargs=argparse.REMAINDER)
+    p_build = sub.add_parser("build", help="階層図用の JSON を作る")
+    p_build.add_argument("--output", type=Path, default=Path(__file__).resolve().parent.parent / "site" / "data" / "pedigree.json")
+    p_build.set_defaults(func=cmd_build)
+    p_admin = sub.add_parser("admin", help="確認画面（Streamlit）を開く。後ろのオプションは Streamlit に渡す")
     p_admin.set_defaults(func=cmd_admin)
-    args = parser.parse_args(argv)
+    args, extra = parser.parse_known_args(argv)
+    if extra and args.command != "admin":
+        parser.error(f"不明な引数です: {' '.join(extra)}")
+    args.extra = extra
     return args.func(args)
 
 

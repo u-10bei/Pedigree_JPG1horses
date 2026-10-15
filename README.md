@@ -22,6 +22,16 @@ pytest                        # テスト
 
 データの更新手順は [docs/UPDATE.md](docs/UPDATE.md) を参照してください。
 
+### 階層図のプレビュー
+
+```sh
+python -m pedigree build                 # site/data/pedigree.json を作る
+python -m http.server 8000 --directory site
+```
+
+ブラウザで http://localhost:8000 を開きます（Codespaces ではポート 8000 の転送先）。
+`?horse=ディープインパクト` のように馬名を付けると、その馬の父系を開いた状態で表示します。
+
 ## 出典
 
 - Wikipedia（CC BY-SA 4.0）：各レースの「歴代優勝馬」
