@@ -94,3 +94,34 @@ def test_client_retries_rate_limit_and_caches(tmp_path):
 def test_client_treats_404_as_empty(tmp_path):
     client = Client(cache_dir=tmp_path, min_interval=0, session=FakeSession([FakeResponse(404)]), sleep=lambda s: None)
     assert client.wikipedia_html("存在しない記事") == ""
+
+
+def test_parse_infobox_father():
+    from pedigree.fetch.wikipedia import parse_infobox_father
+
+    ja = """<table class="infobox"><tr><th>父</th><td><a href="./ハーツクライ">ハーツクライ</a><sup>[1]</sup></td></tr>
+    <tr><th>生国</th><td><a href="./日本">日本</a>（北海道安平町）</td></tr></table>"""
+    assert parse_infobox_father(ja) == ("ハーツクライ", "ハーツクライ")
+    en = """<table class="infobox vcard"><tr><th>Sire</th><td>Encosta de Lago</td></tr>
+    <tr><th>Country</th><td>Australia</td></tr></table>"""
+    assert parse_infobox_father(en) == ("Encosta de Lago", None)
+    assert parse_infobox_father("<p>情報欄なし</p>") is None
+
+
+def test_jawiki_categories_follows_redirects(tmp_path):
+    import json
+
+    response = {
+        "query": {
+            "normalized": [{"from": "ヘネシー_(競走馬)", "to": "ヘネシー (競走馬)"}],
+            "redirects": [{"from": "ストームキャット (競走馬)", "to": "ストームキャット"}],
+            "pages": {
+                "1": {"title": "ヘネシー (競走馬)", "categories": [{"title": "Category:日本供用種牡馬"}]},
+                "2": {"title": "ストームキャット"},
+            },
+        }
+    }
+    session = FakeSession([FakeResponse(200, json.dumps(response))])
+    client = Client(cache_dir=tmp_path, min_interval=0, session=session, sleep=lambda s: None)
+    cats = client.jawiki_categories(["ヘネシー_(競走馬)", "ストームキャット (競走馬)"], ["日本供用種牡馬"])
+    assert cats == {"ヘネシー_(競走馬)": {"日本供用種牡馬"}, "ストームキャット (競走馬)": set()}
