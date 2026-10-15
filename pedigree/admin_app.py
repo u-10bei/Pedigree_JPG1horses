@@ -29,7 +29,7 @@ KIND_LABELS = {
     merge.KIND_CHECK: "参考",
 }
 KIND_CODES = {label: code for code, label in KIND_LABELS.items()}
-EDITABLE = ["承認", "馬名", "父", "生年", "年", "レース"]
+EDITABLE = ["承認", "馬名", "父", "生年", "年", "レース", "外す"]
 COLUMN_NAMES = {
     "Kind": "種別",
     "Ryear": "年",
@@ -55,6 +55,7 @@ def to_frame(rows: list[merge.ReviewRow]) -> pd.DataFrame:
     df.insert(0, "承認", df["Approve"].str.casefold().isin(merge.APPROVED))
     df["Kind"] = df["Kind"].map(lambda k: KIND_LABELS.get(k, k))
     df["リンク"] = df["Source"].map(source_url)
+    df["外す"] = False  # 画面上だけの列（一覧から外す行の印）
     return df.drop(columns=["Approve"]).rename(columns=COLUMN_NAMES)
 
 
@@ -115,7 +116,7 @@ def review_tab() -> None:
         width="stretch",
         height=560,
         disabled=[c for c in view.columns if c not in EDITABLE],
-        column_order=["承認", "種別", "年", "レース", "馬名", "別表記", "父", "生年", "注記", "リンク"],
+        column_order=["承認", "外す", "種別", "年", "レース", "馬名", "別表記", "父", "生年", "注記", "リンク"],
         column_config={
             "承認": st.column_config.CheckboxColumn(width="small"),
             "種別": st.column_config.TextColumn(width="small"),
@@ -123,6 +124,7 @@ def review_tab() -> None:
             "生年": st.column_config.TextColumn(width="small"),
             "注記": st.column_config.TextColumn(width="large"),
             "リンク": st.column_config.LinkColumn(display_text="出典", width="small"),
+            "外す": st.column_config.CheckboxColumn(width="small", help="チェックして下のボタンを押すと、確認一覧から外します"),
         },
     )
     df.loc[edited.index, EDITABLE] = edited[EDITABLE]
@@ -142,8 +144,15 @@ def review_tab() -> None:
     if col4.button("検証して data/ に反映", type="primary", width="stretch"):
         apply(dry_run=False)
 
-    if st.button("検証だけする（反映しない）"):
+    col5, col6 = st.columns(2)
+    if col5.button("検証だけする（反映しない）", width="stretch"):
         apply(dry_run=True)
+    marked = int(df["外す"].sum())
+    if col6.button(f"「外す」にチェックした行を一覧から外す（{marked} 行）", width="stretch", disabled=not marked):
+        st.session_state.df = df[~df["外す"]]
+        save_review()
+        reset_editor()
+        st.rerun()
 
 
 def apply(dry_run: bool) -> None:
@@ -193,6 +202,11 @@ def submit_horse() -> None:
         state.manual_msg = ("error", "生年は数字で入力してください")
         return
 
+    registered = registered_horse(name)
+    if registered is not None:
+        add_registered_birth_year(registered, father, birth)
+        return
+
     # 父が確認一覧にあっても、まだ既存の馬につながっていなければ続けて入力してもらう
     father_known = father in known_names() and merge.normalize(father) not in {
         merge.normalize(n) for n in unresolved_horses()
@@ -206,6 +220,64 @@ def submit_horse() -> None:
         state.new_name = father
     state.new_father = None
     state.new_birth = ""
+
+
+def registered_horse(name: str):
+    """data/ に登録済みの同じ名前の馬。"""
+    key = merge.normalize(name)
+    return next((h for h in io.load(DATA_DIR).horses.values() if merge.normalize(h.name) == key), None)
+
+
+def add_registered_birth_year(horse, father: str, birth: str) -> None:
+    """登録済みの馬を「馬を追加」で入力したとき。新規行は作らず、生年だけ受け付ける。"""
+    state = st.session_state
+    ds = io.load(DATA_DIR)
+    current_father = ds.horses[horse.father_id].name
+    note = "" if merge.normalize(father) == merge.normalize(current_father) else f"（登録済みの父は {current_father} です。父は変更していません）"
+    if birth and str(horse.birth_year or "") != birth:
+        df: pd.DataFrame = state.df
+        same = df.index[(df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR]) & (df["馬名"] == horse.name)]
+        if len(same):
+            df.loc[same, ["生年", "承認", "注記"]] = [birth, True, "手動で修正"]
+            save_review()
+            reset_editor()
+        else:
+            add_row(merge.ReviewRow(Approve="y", Kind=merge.KIND_BIRTH_YEAR, Horse=horse.name, BirthYear=birth, Note="手動追加"))
+        state.manual_msg = ("success", f"{horse.name} は登録済みのため、生年 {birth} を設定する行を追加しました{note}")
+    else:
+        state.manual_msg = ("warning", f"{horse.name} はすでに登録されています。追加しませんでした{note}")
+    state.new_name = ""
+    state.new_father = None
+    state.new_birth = ""
+
+
+def submit_win() -> None:
+    """「勝利を追加」の送信。登録済み・確認一覧にある勝利は二重に追加しない。"""
+    state = st.session_state
+    year, race, horse = state.get("win_year"), state.get("win_race"), state.get("win_horse")
+    if year is None or not race or not horse:
+        state.win_msg = ("error", "年・レース・勝ち馬を入力してください")
+        return
+    year = int(year)
+    label = f"{year} {race}：{horse}"
+    ds = io.load(DATA_DIR)
+    names = ds.by_name()
+    if horse in names and any(w.year == year and w.race == race and w.winner_id == names[horse].id for w in ds.wins):
+        state.win_msg = ("warning", f"{label} はすでに登録されています。追加しませんでした")
+        return
+    df: pd.DataFrame = state.df
+    same = df.index[
+        (df["種別"] == KIND_LABELS[merge.KIND_WIN]) & (df["年"] == str(year)) & (df["レース"] == race) & (df["馬名"] == horse)
+    ]
+    if len(same):
+        df.loc[same, "承認"] = True
+        save_review()
+        reset_editor()
+        state.win_msg = ("success", f"{label} は確認一覧にあったので、その行を承認済みにしました")
+    else:
+        add_row(merge.ReviewRow(Approve="y", Kind=merge.KIND_WIN, Ryear=str(year), Rtitle=race, Horse=horse, Note="手動追加"))
+        state.win_msg = ("success", f"{label} を追加しました")
+    state.win_year, state.win_race, state.win_horse = None, None, None
 
 
 def upsert_horse(name: str, father: str, birth: str) -> None:
@@ -254,17 +326,16 @@ def manual_tab() -> None:
             st.text_input("生年（空欄可）", key="new_birth")
             st.form_submit_button("追加", on_click=submit_horse)
 
-    with right, st.form("add-win", clear_on_submit=True):
+    with right:
         st.subheader("勝利を追加")
-        year = st.number_input("年", min_value=1932, max_value=2100, value=None, step=1)
-        race = st.selectbox("レース", sorted(ds.races), index=None, placeholder="選択")
-        horse = st.selectbox("勝ち馬", names, index=None, placeholder="名前を入力して選択")
-        if st.form_submit_button("追加"):
-            if year is None or not race or not horse:
-                st.error("年・レース・勝ち馬を入力してください")
-            else:
-                add_row(merge.ReviewRow(Approve="y", Kind=merge.KIND_WIN, Ryear=str(int(year)), Rtitle=race, Horse=horse, Note="手動追加"))
-                st.success(f"{int(year)} {race}：{horse} を追加しました")
+        message = st.session_state.pop("win_msg", None)
+        if message:
+            getattr(st, message[0])(message[1])
+        with st.form("add-win"):
+            st.number_input("年", min_value=1932, max_value=2100, value=None, step=1, key="win_year")
+            st.selectbox("レース", sorted(ds.races), index=None, placeholder="選択", key="win_race")
+            st.selectbox("勝ち馬", names, index=None, placeholder="名前を入力して選択", key="win_horse")
+            st.form_submit_button("追加", on_click=submit_win)
 
 
 def add_row(row: merge.ReviewRow) -> None:
