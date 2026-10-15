@@ -42,6 +42,6 @@ MariaDB + PHP + D3.js 構成を、Python + CSV + 静的サイト（GitHub Pages�
 1. **基盤** ✅：CSV 移行、ブラックホーク重複の統合（Id 979 → 939）、`BirthYear` 列、`races.csv`・`lines.csv`、検証、テスト、`.devcontainer`、CI
 2. **取得と照合** ✅：Wikipedia・Wikidata の取得（キャッシュ・再試行付き）、照合（`review`）と反映（`apply`）。手順は [UPDATE.md](UPDATE.md)
 3. **確認画面と CLI** ✅：確認画面（`python -m pedigree admin`）で絞り込み・修正・承認・反映・手動追加。CLI の `add horse` / `add win`
-4. **追いつきの実行**：Codespaces で取得 → 確認
-5. **階層図**：JSON 生成、折りたたみツリー
+4. **追いつきの実行** ✅：2005〜2026 年 10 月の G1 勝ち馬を追加（1,429 頭 / 1,204 勝）
+5. **階層図** ✅：`python -m pedigree build` で `site/data/pedigree.json` を生成し、`site/` の折りたたみツリーで表示
 6. **CI/CD**：GitHub Pages へのデプロイ

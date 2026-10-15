@@ -4,7 +4,7 @@
 
   // 「主要な系統を開く」で開く基準：子孫の G1 勝利数
   const MAJOR_THRESHOLD = 100;
-  const MIN_FIT_SCALE = 0.55; // 全体表示でもこれ以上は縮小しない（ラベルが読めなくなるため）
+  const INITIAL_SCALE = 0.85; // 最初の表示の倍率（ラベルが読める大きさ）
   const NODE_DX = 22; // 縦方向の間隔
   const NODE_DY = 190; // 横方向（世代）の間隔
 
@@ -268,11 +268,15 @@
     render(id);
   }
 
-  function fitToView() {
-    const box = viewport.node().getBBox();
+  // 最初の表示：子孫の G1 勝利数が最も多い系統の起点を、画面の左寄り中央に置く。
+  // 木は 20 世代以上あり全体を 1 画面に収めると文字が読めないため、読める倍率で主要部分を見せる
+  function initialView() {
+    const visible = root.descendants().filter((d) => d.data.horse.id !== 0);
+    const roots = visible.filter((d) => d.data.horse.lineRoot && lineColor.get(d.data.horse.line));
+    const target = (roots.length ? roots : visible).reduce((a, b) => (b.data.horse.descWins > a.data.horse.descWins ? b : a));
     const { width, height } = svg.node().getBoundingClientRect();
-    const k = Math.min(1, Math.max(MIN_FIT_SCALE, Math.min(width / (box.width + 80), height / (box.height + 80))));
-    svg.call(zoom.transform, d3.zoomIdentity.translate(40 - box.x * k, height / 2 - (box.y + box.height / 2) * k).scale(k));
+    const k = INITIAL_SCALE;
+    svg.call(zoom.transform, d3.zoomIdentity.translate(width * 0.3 - target.y * k, height / 2 - target.x * k).scale(k));
   }
 
   function focusOn(id) {
@@ -433,18 +437,18 @@
       expandMajor();
       highlight = new Set();
       render();
-      fitToView();
+      initialView();
     });
     document.getElementById("expand-all").addEventListener("click", () => {
       expandAll();
       render();
-      fitToView();
+      initialView();
     });
     document.getElementById("collapse-all").addEventListener("click", () => {
       collapseAll();
       highlight = new Set();
       render();
-      fitToView();
+      initialView();
     });
     document.getElementById("show-chain").addEventListener("change", (e) => {
       showChain = e.target.checked;
@@ -466,7 +470,7 @@
       setup();
       expandMajor();
       render();
-      fitToView();
+      initialView();
       renderLegend();
       renderTable();
       renderSummary();
