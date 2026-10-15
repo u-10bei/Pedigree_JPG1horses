@@ -13,9 +13,10 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+fetch = ["requests>=2.31", "beautifulsoup4>=4.12"]
 
-[tool.setuptools]
-packages = ["pedigree"]
+[tool.setuptools.packages.find]
+include = ["pedigree*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

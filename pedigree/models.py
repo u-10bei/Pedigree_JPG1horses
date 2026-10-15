@@ -28,6 +28,11 @@ class Race:
     name: str
     first_year: int
     last_year: int | None = None
+    wiki_title: str | None = None  # 日本語版 Wikipedia の記事名（レース名と同じなら空欄）
+
+    @property
+    def article(self) -> str:
+        return self.wiki_title or self.name
 
     def held_in(self, year: int) -> bool:
         if year < self.first_year:
