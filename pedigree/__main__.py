@@ -9,6 +9,7 @@
     python -m pedigree add win 年 レース 馬名                      勝利を 1 件追加する
     python -m pedigree admin      確認画面（Streamlit）を開く
     python -m pedigree build      階層図用の site/data/pedigree.json を作る
+    python -m pedigree births     生年が空欄の馬の生年を review.csv に追加する
 """
 
 from __future__ import annotations
@@ -129,6 +130,29 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_births(args: argparse.Namespace) -> int:
+    from . import births
+
+    ds = io.load(args.data_dir)
+    rows = births.infer_from_races(ds)
+    print(f"年齢限定戦から計算：{len(rows)} 頭")
+    if not args.no_fetch:
+        from .fetch import run
+        from .fetch.client import Client
+
+        done = {r.Horse for r in rows}
+        rest = [h for h in births.missing_horses(ds) if h.name not in done]
+        fetched = run.fetch_birth_years(ds, Client(min_interval=args.interval), rest)
+        print(f"Wikipedia の情報欄から取得：{len(fetched)} 頭（対象 {len(rest)} 頭）")
+        rows += fetched
+    path = args.staging_dir / merge.REVIEW_FILE
+    merged, added = births.add_rows(merge.read_review(path), rows)
+    merge.write_review(merged, path)
+    left = len(births.missing_horses(ds)) - len({r.Horse for r in rows})
+    print(f"{path} に {added} 行を追加しました（まだ分からない馬 {left} 頭は確認画面の「生年の入力」タブで入力できます）")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m pedigree")
     parser.add_argument("--data-dir", type=Path, default=io.DATA_DIR)
@@ -160,6 +184,10 @@ def main(argv: list[str] | None = None) -> int:
     p_build = sub.add_parser("build", help="階層図用の JSON を作る")
     p_build.add_argument("--output", type=Path, default=Path(__file__).resolve().parent.parent / "site" / "data" / "pedigree.json")
     p_build.set_defaults(func=cmd_build)
+    p_births = sub.add_parser("births", help="生年が空欄の馬の生年を review.csv に追加する")
+    p_births.add_argument("--no-fetch", action="store_true", help="Wikipedia から取得せず、年齢限定戦からの計算だけ行う")
+    p_births.add_argument("--interval", type=float, default=1.0, help="リクエストの最小間隔（秒）")
+    p_births.set_defaults(func=cmd_births)
     p_admin = sub.add_parser("admin", help="確認画面（Streamlit）を開く。後ろのオプションは Streamlit に渡す")
     p_admin.set_defaults(func=cmd_admin)
     args, extra = parser.parse_known_args(argv)

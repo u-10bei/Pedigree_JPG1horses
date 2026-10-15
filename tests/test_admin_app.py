@@ -175,3 +175,11 @@ def test_marked_rows_are_removed_from_review(dirs):
     at.run()
     next(b for b in at.button if b.label.startswith("「外す」にチェックした行を一覧から外す")).click().run()
     assert "保留馬" not in [r.Horse for r in merge.read_review(staging / merge.REVIEW_FILE)]
+
+
+def test_births_tab_lists_horses_without_birth_year(dirs):
+    data, _ = dirs
+    blank = sum(1 for h in io.load(data).horses.values() if h.id != 0 and h.birth_year is None)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    assert any(f"空欄 {blank} 頭" in c.value for c in at.caption)

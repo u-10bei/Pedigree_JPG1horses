@@ -153,3 +153,21 @@ def parse_infobox_father(html: str) -> tuple[str, str | None] | None:
             return name, _link_title(a)
     name = td.get_text(" ", strip=True)
     return (name, None) if name else None
+
+
+BIRTH_HEADERS = ("生誕", "生年月日", "Foaled")
+BIRTH_YEAR = re.compile(r"(1[6-9]\d\d|20\d\d)")
+
+
+def parse_infobox_birth_year(html: str) -> int | None:
+    """競走馬の記事の情報欄（日本語版の「生誕」、英語版の「Foaled」）から生年を取り出す。"""
+    td = _infobox_cell(html, BIRTH_HEADERS)
+    if td is None:
+        return None
+    match = BIRTH_YEAR.search(td.get_text(" ", strip=True))
+    return int(match.group(1)) if match else None
+
+
+def infobox_father_text(html: str) -> str:
+    td = _infobox_cell(html, FATHER_HEADERS)
+    return td.get_text(" ", strip=True) if td is not None else ""

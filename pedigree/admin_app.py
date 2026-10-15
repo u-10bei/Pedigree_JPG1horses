@@ -344,6 +344,87 @@ def add_row(row: merge.ReviewRow) -> None:
     reset_editor()
 
 
+def birth_rows(ds) -> pd.DataFrame:
+    """生年が空欄の馬の一覧。父・子の生年や初勝利から、ありうる生年の範囲を目安として出す。"""
+    df: pd.DataFrame = st.session_state.df
+    pending = dict(zip(df.loc[df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR], "馬名"], df.loc[df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR], "生年"]))
+    children = ds.children()
+    first_win: dict[int, tuple[int, str]] = {}
+    for w in sorted(ds.wins, key=lambda w: w.year):
+        first_win.setdefault(w.winner_id, (w.year, w.race))
+    records = []
+    for h in ds.horses.values():
+        if h.id == ORIGIN_ID or h.birth_year is not None:
+            continue
+        father = ds.horses[h.father_id]
+        kid_years = [ds.horses[c].birth_year for c in children.get(h.id, []) if ds.horses[c].birth_year]
+        low = father.birth_year + 3 if father.birth_year else None
+        highs = [min(kid_years) - 3] if kid_years else []
+        if h.id in first_win:
+            highs.append(first_win[h.id][0] - 2)
+        high = min(highs) if highs else None
+        records.append(
+            {
+                "馬名": h.name,
+                "父": father.name if father.id != ORIGIN_ID else "",
+                "父の生年": father.birth_year or "",
+                "初勝利": f"{first_win[h.id][0]} {first_win[h.id][1]}" if h.id in first_win else "",
+                "目安": f"{low or '?'}〜{high or '?'}" if (low or high) else "",
+                "確認一覧の値": pending.get(h.name, ""),
+                "生年": "",
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def births_tab() -> None:
+    ds = io.load(DATA_DIR)
+    st.write(
+        "data/ で生年が空欄の馬です。分かる馬の「生年」を入力し、下のボタンで確認一覧に追加してください"
+        "（反映は「確認」タブから）。「目安」は父の生年＋3 年から、子の生年－3 年・初勝利－2 年までの範囲です。"
+    )
+    st.caption("自動で埋められる分は、先に `python -m pedigree births` を実行すると確認一覧に入ります。")
+    table = birth_rows(ds)
+    if table.empty:
+        st.success("生年が空欄の馬はいません")
+        return
+    only_new = st.checkbox("確認一覧にまだ生年の行がない馬だけ表示", value=True)
+    view = table[table["確認一覧の値"] == ""] if only_new else table
+    st.caption(f"空欄 {len(table)} 頭（確認一覧に生年の行あり {int((table['確認一覧の値'] != '').sum())} 頭）・表示 {len(view)} 頭")
+    edited = st.data_editor(
+        view,
+        key=f"births-{st.session_state.editor_version}-{only_new}",
+        hide_index=True,
+        width="stretch",
+        height=520,
+        disabled=[c for c in view.columns if c != "生年"],
+        column_config={"生年": st.column_config.TextColumn(help="4 桁の西暦（例：1957）")},
+    )
+    entered = edited[edited["生年"].astype(str).str.strip() != ""]
+    if st.button(f"入力した生年を確認一覧に追加（{len(entered)} 頭）", type="primary", disabled=entered.empty):
+        bad = [n for n, y in zip(entered["馬名"], entered["生年"]) if not str(y).strip().isdigit() or len(str(y).strip()) != 4]
+        if bad:
+            st.error(f"生年は 4 桁の数字で入力してください：{'、'.join(bad)}")
+            return
+        for name, year in zip(entered["馬名"], entered["生年"]):
+            df: pd.DataFrame = st.session_state.df
+            same = df.index[(df["種別"] == KIND_LABELS[merge.KIND_BIRTH_YEAR]) & (df["馬名"] == name)]
+            if len(same):
+                df.loc[same, ["生年", "承認", "注記"]] = [str(year).strip(), True, "手動入力"]
+            else:
+                st.session_state.df = pd.concat(
+                    [df, to_frame([merge.ReviewRow(Approve="y", Kind=merge.KIND_BIRTH_YEAR, Horse=name, BirthYear=str(year).strip(), Note="手動入力")])],
+                    ignore_index=True,
+                )
+        save_review()
+        reset_editor()
+        st.session_state.births_msg = f"{len(entered)} 頭の生年を確認一覧に追加しました。「確認」タブで反映してください。"
+        st.rerun()
+    message = st.session_state.pop("births_msg", None)
+    if message:
+        st.success(message)
+
+
 def data_tab() -> None:
     ds = io.load(DATA_DIR)
     issues = validate(ds)
@@ -364,11 +445,13 @@ def main() -> None:
     st.set_page_config(page_title="血統データの確認", layout="wide")
     st.title("血統データの確認")
     load_state()
-    tab_review, tab_manual, tab_data = st.tabs(["確認", "手動追加", "データ"])
+    tab_review, tab_manual, tab_births, tab_data = st.tabs(["確認", "手動追加", "生年の入力", "データ"])
     with tab_review:
         review_tab()
     with tab_manual:
         manual_tab()
+    with tab_births:
+        births_tab()
     with tab_data:
         data_tab()
 

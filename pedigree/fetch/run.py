@@ -11,7 +11,7 @@ from ..merge import HORSES_RAW_FILE, WINNERS_RAW_FILE, RawWin, normalize
 from ..models import ORIGIN_ID, Dataset
 from .client import Client
 from .wikidata import Entity, Wikidata
-from .wikipedia import parse_infobox_father, parse_winners
+from .wikipedia import infobox_father_text, parse_infobox_birth_year, parse_infobox_father, parse_winners
 
 JAWIKI = "jawiki:"
 WIKIDATA = "wikidata:"
@@ -294,3 +294,44 @@ def write_horses(rows: list[dict[str, str]], staging_dir: Path) -> Path:
         writer.writeheader()
         writer.writerows(rows)
     return path
+
+
+# --- 生年が空欄の馬（Wikipedia の情報欄） ----------------------------------
+
+
+def fetch_birth_years(ds: Dataset, client: Client, horses: list) -> list:
+    """Wikipedia の情報欄から生年を取る。返り値は生年の ReviewRow。
+
+    Q 番号が分かっている馬はその記事を使う。名前で記事を探した場合は、情報欄の父が
+    データの父と一致するときだけ採用する（同名の別の馬の記事を拾わないため）。
+    """
+    from ..merge import KIND_BIRTH_YEAR, ReviewRow
+
+    wikidata = Wikidata(client)
+    entities = wikidata.by_ids([h.wikidata for h in horses if h.wikidata])
+    rows = []
+    for i, horse in enumerate(horses, 1):
+        father = ds.horses[horse.father_id]
+        entity = entities.get(horse.wikidata) if horse.wikidata else None
+        if entity is not None:
+            titles = [("ja", entity.jawiki), ("en", entity.enwiki)]
+            verified = True
+        else:
+            name = clean_name(horse.name)
+            titles = [("ja", f"{name} (競走馬)"), ("ja", name), ("en", f"{name} (horse)"), ("en", name)]
+            verified = False
+        for lang, title in titles:
+            if not title:
+                continue
+            html = client.wikipedia_html(title, lang)
+            year = parse_infobox_birth_year(html) if html else None
+            if year is None:
+                continue
+            if not verified and normalize(father.name) not in normalize(infobox_father_text(html)):
+                continue  # 父が一致しない：同名の別の馬の記事
+            site = "jawiki" if lang == "ja" else "enwiki"
+            rows.append(ReviewRow(Approve="y", Kind=KIND_BIRTH_YEAR, Horse=horse.name, BirthYear=str(year), Source=f"{site}:{title}"))
+            break
+        if i % 50 == 0:
+            log(f"  {i} / {len(horses)} 頭")
+    return rows

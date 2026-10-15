@@ -125,3 +125,14 @@ def test_jawiki_categories_follows_redirects(tmp_path):
     client = Client(cache_dir=tmp_path, min_interval=0, session=session, sleep=lambda s: None)
     cats = client.jawiki_categories(["ヘネシー_(競走馬)", "ストームキャット (競走馬)"], ["日本供用種牡馬"])
     assert cats == {"ヘネシー_(競走馬)": {"日本供用種牡馬"}, "ストームキャット (競走馬)": set()}
+
+
+def test_parse_infobox_birth_year():
+    from pedigree.fetch.wikipedia import infobox_father_text, parse_infobox_birth_year
+
+    ja = '<table class="infobox"><tr><th>生誕</th><td>1940年<sup>[1]</sup>4月5日</td></tr><tr><th>父</th><td>トウルヌソル</td></tr></table>'
+    assert parse_infobox_birth_year(ja) == 1940
+    assert infobox_father_text(ja) == "トウルヌソル"
+    en = '<table class="infobox"><tr><th>Foaled</th><td>3 May 1764</td></tr></table>'
+    assert parse_infobox_birth_year(en) == 1764
+    assert parse_infobox_birth_year('<table class="infobox"><tr><th>生誕</th><td>不明</td></tr></table>') is None
