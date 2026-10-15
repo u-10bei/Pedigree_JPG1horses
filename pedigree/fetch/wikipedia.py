@@ -130,7 +130,6 @@ def _winners_in_cell(year: int, cell: Tag) -> list[WinnerCell]:
 
 
 FATHER_HEADERS = ("父", "Sire")
-COUNTRY_HEADERS = ("生国", "Country")
 
 
 def _infobox_cell(html: str, headers: tuple[str, ...]) -> Tag | None:
@@ -154,11 +153,3 @@ def parse_infobox_father(html: str) -> tuple[str, str | None] | None:
             return name, _link_title(a)
     name = td.get_text(" ", strip=True)
     return (name, None) if name else None
-
-
-def parse_infobox_country(html: str) -> str | None:
-    """情報欄の生国（日本語版の「生国」、英語版の「Country」）。"""
-    td = _infobox_cell(html, COUNTRY_HEADERS)
-    if td is None:
-        return None
-    return td.get_text(" ", strip=True) or None

@@ -11,12 +11,13 @@ from ..merge import HORSES_RAW_FILE, WINNERS_RAW_FILE, RawWin, normalize
 from ..models import ORIGIN_ID, Dataset
 from .client import Client
 from .wikidata import Entity, Wikidata
-from .wikipedia import parse_infobox_country, parse_infobox_father, parse_winners
+from .wikipedia import parse_infobox_father, parse_winners
 
 JAWIKI = "jawiki:"
 WIKIDATA = "wikidata:"
 MAX_DEPTH = 40
-JAPAN = "Q17"
+# この日本語版 Wikipedia のカテゴリに入っている馬は、日本で登録された馬としてカナで表記する
+JAPAN_CATEGORIES = ["日本供用種牡馬", "日本調教の競走馬"]
 
 _TRAILING_PAREN = re.compile(r"\s*[(（][^()（）]*[)）]$")
 
@@ -217,24 +218,14 @@ def fetch_horses(
         log(f"  祖先 {depth + 1} 代目: 新規 {len(next_frontier)} 頭")
         frontier = next_frontier
 
-    # 3. 表記：日本で登録された馬（日本の G1 勝ち馬、または日本生まれの子がいる種牡馬）はカナ、それ以外は英字
-    def born_in_japan(entity: Entity) -> bool:
-        if entity.birth_place == JAPAN:
-            return True
-        for lang, title in (("ja", entity.jawiki), ("en", entity.enwiki)):
-            if title:
-                country = parse_infobox_country(client.wikipedia_html(title, lang))
-                if country:
-                    return country.startswith("日本") or "Japan" in country
-        return False
-
+    # 3. 表記：日本で登録された馬（日本の G1 勝ち馬、日本で供用された種牡馬、日本で調教された競走馬）は
+    #    カナ、それ以外は英字。種牡馬・競走馬かどうかは日本語版 Wikipedia のカテゴリで判定する
     winner_qids = {e.qid for e in winners.values()}
+    ancestors = {qid: e for qid, e in entities.items() if qid not in winner_qids}
+    categories = client.jawiki_categories([e.jawiki for e in ancestors.values() if e.jawiki], JAPAN_CATEGORIES)
     renamed: dict[str, str] = {}
-    for qid, entity in entities.items():
-        if qid in winner_qids:
-            continue
-        children = [entities[c] for c, f in father_of.items() if f == qid and c in entities]
-        registered = any(born_in_japan(c) for c in children)
+    for qid, entity in ancestors.items():
+        registered = bool(entity.jawiki and categories.get(entity.jawiki))
         name = display_name(entity, qid) if registered else clean_name(entity.en or entity.ja or qid)
         old = rows[qid]["Horse"]
         if name != old:
@@ -243,7 +234,8 @@ def fetch_horses(
             renamed[old] = name
     for row in rows.values():
         row["Father"] = renamed.get(row["Father"], row["Father"])
-    log(f"表記：英字 {sum(1 for n in renamed.values() if n.isascii())} 頭 / カナのまま {len(entities) - len(winner_qids) - len(renamed)} 頭")
+    katakana = sum(1 for qid in ancestors if not rows[qid]["Horse"].isascii())
+    log(f"表記：カナ {katakana} 頭 / 英字 {len(ancestors) - katakana} 頭")
 
     # 4. 既存の馬の生年（と父の照合用の情報）
     #    Q 番号が分かっている馬はそれで引く。名前で引いた馬は父が既存データと合うか確かめ、
