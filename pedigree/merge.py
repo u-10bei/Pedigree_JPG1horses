@@ -37,10 +37,14 @@ KIND_CHECK = "check"  # 参考情報。反映はしない
 _SUFFIX = re.compile(r"[(（][^()（）]{1,10}[)）]$")
 
 
+# 古い表記（「ガヴアナー」「ヒカリデユール」）と現代の表記を同一視するため、小書きの仮名を並字にそろえる
+_SMALL_KANA = str.maketrans("ァィゥェォッャュョヮヵヶ", "アイウエオツヤユヨワカケ")
+
+
 def normalize(name: str) -> str:
     name = unicodedata.normalize("NFKC", name).strip()
     name = _SUFFIX.sub("", name).strip()
-    return re.sub(r"\s+", " ", name).casefold()
+    return re.sub(r"\s+", " ", name).translate(_SMALL_KANA).casefold()
 
 
 @dataclass
@@ -172,6 +176,10 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
             row.Note = f"父「{row.Father}」が既存の馬につながりません"
         return not row.Note
 
+    winners_by_race: dict[tuple[int, str], list[str]] = {}
+    for w in ds.wins:
+        winners_by_race.setdefault((w.year, w.race), []).append(ds.horses[w.winner_id].name)
+
     win_rows = []
     seen_wins = set()
     for w in sorted(raw_wins, key=lambda w: (w.year, w.race, w.horse)):
@@ -183,6 +191,12 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
             continue
         seen_wins.add((w.year, w.race, name))
         if existing is not None and (w.year, w.race, existing.id) in existing_wins:
+            continue
+        if existing is None and (w.year, w.race) in winners_by_race:
+            # 既存データにある年の勝ち馬が別名で取得された（表記揺れか、データの誤り）
+            row.Kind = KIND_CHECK
+            row.Note = f"既存の勝ち馬（{'・'.join(winners_by_race[(w.year, w.race)])}）と名前が一致しません"
+            win_rows.append(row)
             continue
         if race is None:
             row.Note = "races.csv にないレース名です"
@@ -198,9 +212,23 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
         existing = index.existing_horse(rh.name)
         if existing is None:
             continue
+        father = index.existing_horse(rh.father) if rh.father else None
+        current = ds.horses.get(existing.father_id)
+        father_differs = father is not None and current is not None and father.id != current.id
+        note = ""
+        if father_differs:
+            note = "父が既存と異なるため、別の馬の情報の可能性があります"
+        elif rh.father and father is None:
+            note = f"取得した父「{rh.father}」を既存データと照合できません（別の馬の可能性があります）"
         if rh.birth_year is not None and existing.birth_year is None:
             year_rows.append(
-                ReviewRow(Kind=KIND_BIRTH_YEAR, Horse=existing.name, BirthYear=str(rh.birth_year), Source=rh.source)
+                ReviewRow(
+                    Kind=KIND_BIRTH_YEAR,
+                    Horse=existing.name,
+                    BirthYear=str(rh.birth_year),
+                    Note=note,
+                    Source=rh.source,
+                )
             )
         elif rh.birth_year is not None and existing.birth_year != rh.birth_year:
             check_rows.append(
@@ -212,19 +240,16 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
                     Source=rh.source,
                 )
             )
-        if rh.father:
-            father = index.existing_horse(rh.father)
-            current = ds.horses.get(existing.father_id)
-            if father is not None and current is not None and father.id != current.id:
-                check_rows.append(
-                    ReviewRow(
-                        Kind=KIND_CHECK,
-                        Horse=existing.name,
-                        Father=father.name,
-                        Note=f"父が既存（{current.name}）と異なります",
-                        Source=rh.source,
-                    )
+        if father_differs:
+            check_rows.append(
+                ReviewRow(
+                    Kind=KIND_CHECK,
+                    Horse=existing.name,
+                    Father=father.name,
+                    Note=f"父が既存（{current.name}）と異なります",
+                    Source=rh.source,
                 )
+            )
 
     rows = [*horse_rows.values(), *year_rows, *win_rows, *check_rows]
     for row in rows:

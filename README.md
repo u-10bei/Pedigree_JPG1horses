@@ -15,7 +15,14 @@ Represent the pedigree of a Japanese G1 horse in a hierarchical tree.
 GitHub Codespaces で開くと、必要なものが自動でインストールされます。ローカルで動かす場合は次のとおりです。
 
 ```sh
-pip install -e '.[dev]'
+pip install -e '.[dev,fetch]'
 python -m pedigree validate   # データの整合性を検証
 pytest                        # テスト
 ```
+
+データの更新手順は [docs/UPDATE.md](docs/UPDATE.md) を参照してください。
+
+## 出典
+
+- Wikipedia（CC BY-SA 4.0）：各レースの「歴代優勝馬」
+- Wikidata（CC0）：父・生年

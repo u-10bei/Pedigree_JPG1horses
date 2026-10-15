@@ -23,7 +23,7 @@ MariaDB + PHP + D3.js 構成を、Python + CSV + 静的サイト（GitHub Pages�
 |---|---|---|
 | `pedigree.csv` | `Id, Horse, FatherId, BirthYear` | Id 0 は三大始祖をまとめる仮想ルート `__origin__`。`BirthYear` は空欄可 |
 | `race_winner.csv` | `Ryear, Rtitle, WinnerId` | 同着に対応するため (年, レース, 勝ち馬) で一意 |
-| `races.csv` | `Rtitle, FirstYear, LastYear` | 対象レースと対象期間。`LastYear` 空欄は継続中 |
+| `races.csv` | `Rtitle, FirstYear, LastYear, WikiTitle` | 対象レースと対象期間。`LastYear` 空欄は継続中。`WikiTitle` は Wikipedia の記事名がレース名と異なる場合のみ |
 | `lines.csv` | `Horse, LineName, Color` | 父系の起点。各馬は自身を含む最も近い起点の系統に属する。`Color` は `#RRGGBB` または空欄 |
 
 ## 検証ルール（`python -m pedigree validate`）
@@ -39,7 +39,7 @@ MariaDB + PHP + D3.js 構成を、Python + CSV + 静的サイト（GitHub Pages�
 ## フェーズ
 
 1. **基盤** ✅：CSV 移行、ブラックホーク重複の統合（Id 979 → 939）、`BirthYear` 列、`races.csv`・`lines.csv`、検証、テスト、`.devcontainer`、CI
-2. **取得と照合**：Wikipedia・Wikidata の取得スクリプト（キャッシュ付き、間隔 1 秒以上）、`merge.py`
+2. **取得と照合** ✅：Wikipedia・Wikidata の取得（キャッシュ・再試行付き）、照合（`review`）と反映（`apply`）。手順は [UPDATE.md](UPDATE.md)
 3. **確認画面と CLI**：staging の承認、手動の修正・追加
 4. **追いつきの実行**：Codespaces で取得 → 確認
 5. **階層図**：JSON 生成、折りたたみツリー

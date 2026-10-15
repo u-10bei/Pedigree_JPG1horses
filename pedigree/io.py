@@ -65,6 +65,7 @@ def load(data_dir: Path = DATA_DIR) -> Dataset:
             name=r["Rtitle"].strip(),
             first_year=int(r["FirstYear"]),
             last_year=_optional_int(r.get("LastYear")),
+            wiki_title=_optional_str(r.get("WikiTitle")),
         )
         races[race.name] = race
 
@@ -102,9 +103,9 @@ def save(dataset: Dataset, data_dir: Path = DATA_DIR) -> None:
     )
     _write_rows(
         data_dir / RACES_FILE,
-        ["Rtitle", "FirstYear", "LastYear"],
+        ["Rtitle", "FirstYear", "LastYear", "WikiTitle"],
         [
-            [r.name, r.first_year, r.last_year]
+            [r.name, r.first_year, r.last_year, r.wiki_title]
             for r in sorted(dataset.races.values(), key=lambda r: (r.first_year, r.name))
         ],
     )

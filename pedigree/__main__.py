@@ -1,6 +1,8 @@
 """コマンドライン。
 
     python -m pedigree validate   data/*.csv の整合性を検証する
+    python -m pedigree fetch winners --from 2005   Wikipedia から勝ち馬を取得する
+    python -m pedigree fetch horses                Wikidata から父・生年を取得する
     python -m pedigree review     staging の取得データを照合し staging/review.csv を作る
     python -m pedigree apply      review.csv の承認済みの行を data/ に反映する
 """
@@ -66,6 +68,24 @@ def cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fetch(args: argparse.Namespace) -> int:
+    from .fetch import run
+    from .fetch.client import Client
+
+    ds = io.load(args.data_dir)
+    client = Client(min_interval=args.interval)
+    if args.target == "winners":
+        rows = run.fetch_winners(ds, client, args.year_from, args.year_to)
+        path = run.write_winners(rows, args.staging_dir)
+        print(f"{path}: {len(rows)} 件")
+    else:
+        raw_wins, _ = merge.load_raw(args.staging_dir)
+        rows = run.fetch_horses(ds, client, raw_wins, include_existing=not args.no_existing)
+        path = run.write_horses(rows, args.staging_dir)
+        print(f"{path}: {len(rows)} 頭")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m pedigree")
     parser.add_argument("--data-dir", type=Path, default=io.DATA_DIR)
@@ -73,6 +93,13 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("validate", help="data/*.csv の整合性を検証する").set_defaults(func=cmd_validate)
     sub.add_parser("review", help="取得データを照合して review.csv を作る").set_defaults(func=cmd_review)
+    p_fetch = sub.add_parser("fetch", help="Wikipedia・Wikidata から取得して staging/ に保存する")
+    p_fetch.add_argument("target", choices=["winners", "horses"])
+    p_fetch.add_argument("--from", dest="year_from", type=int, default=1932, help="勝ち馬を取得する最初の年")
+    p_fetch.add_argument("--to", dest="year_to", type=int, default=9999, help="勝ち馬を取得する最後の年")
+    p_fetch.add_argument("--no-existing", action="store_true", help="既存の馬の生年は取得しない")
+    p_fetch.add_argument("--interval", type=float, default=1.0, help="リクエストの最小間隔（秒）")
+    p_fetch.set_defaults(func=cmd_fetch)
     p_apply = sub.add_parser("apply", help="review.csv の承認済みの行を data/ に反映する")
     p_apply.add_argument("--dry-run", action="store_true", help="検証だけして保存しない")
     p_apply.set_defaults(func=cmd_apply)
