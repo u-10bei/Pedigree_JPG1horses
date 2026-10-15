@@ -89,3 +89,36 @@ class Client:
         """記事の HTML。存在しない記事は空文字列。"""
         quoted = urllib.parse.quote(title.replace(" ", "_"), safe="")
         return self.get_text(f"https://{lang}.wikipedia.org/api/rest_v1/page/html/{quoted}")
+
+    def jawiki_categories(self, titles: list[str], categories: list[str]) -> dict[str, set[str]]:
+        """日本語版 Wikipedia の記事のうち、指定したカテゴリに入っているもの（記事名 → カテゴリ）。"""
+        result: dict[str, set[str]] = {}
+        todo = sorted(set(titles))
+        for i in range(0, len(todo), 50):
+            batch = todo[i : i + 50]
+            data = self.get_json(
+                "https://ja.wikipedia.org/w/api.php",
+                {
+                    "action": "query",
+                    "titles": "|".join(batch),
+                    "prop": "categories",
+                    "clcategories": "|".join(f"Category:{c}" for c in categories),
+                    "cllimit": "max",
+                    "redirects": "1",
+                    "format": "json",
+                },
+            )
+            query = data.get("query", {})
+            # リダイレクト・表記の正規化をたどって、要求した記事名に戻す
+            back = {t: t for t in batch}
+            for step in (*query.get("normalized", []), *query.get("redirects", [])):
+                for original, target in list(back.items()):
+                    if target == step["from"]:
+                        back[original] = step["to"]
+            cats_by_title = {
+                page.get("title"): {c["title"].split(":", 1)[1] for c in page.get("categories", [])}
+                for page in query.get("pages", {}).values()
+            }
+            for original, target in back.items():
+                result[original] = cats_by_title.get(target, set())
+        return result

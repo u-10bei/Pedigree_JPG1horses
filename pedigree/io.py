@@ -49,6 +49,7 @@ def load(data_dir: Path = DATA_DIR) -> Dataset:
             name=row["Horse"].strip(),
             father_id=int(row["FatherId"]),
             birth_year=_optional_int(row.get("BirthYear")),
+            wikidata=_optional_str(row.get("Wikidata")),
         )
         if horse.id in horses:
             raise ValueError(f"{PEDIGREE_FILE}: Id {horse.id} が重複しています")
@@ -87,9 +88,9 @@ def load(data_dir: Path = DATA_DIR) -> Dataset:
 def save(dataset: Dataset, data_dir: Path = DATA_DIR) -> None:
     _write_rows(
         data_dir / PEDIGREE_FILE,
-        ["Id", "Horse", "FatherId", "BirthYear"],
+        ["Id", "Horse", "FatherId", "BirthYear", "Wikidata"],
         [
-            [h.id, h.name, h.father_id, h.birth_year]
+            [h.id, h.name, h.father_id, h.birth_year, h.wikidata]
             for h in sorted(dataset.horses.values(), key=lambda h: h.id)
         ],
     )

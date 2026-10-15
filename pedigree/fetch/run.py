@@ -16,6 +16,8 @@ from .wikipedia import parse_infobox_father, parse_winners
 JAWIKI = "jawiki:"
 WIKIDATA = "wikidata:"
 MAX_DEPTH = 40
+# この日本語版 Wikipedia のカテゴリに入っている馬は、日本で登録された馬としてカナで表記する
+JAPAN_CATEGORIES = ["日本供用種牡馬", "日本調教の競走馬"]
 
 _TRAILING_PAREN = re.compile(r"\s*[(（][^()（）]*[)）]$")
 
@@ -143,13 +145,17 @@ def fetch_horses(
     log(f"  Wikidata で見つかった馬: {len(winners)} 頭")
 
     rows: dict[str, dict[str, str]] = {}  # qid → 行
+    entities: dict[str, Entity] = {}  # qid → エンティティ（新規の馬）
+    father_of: dict[str, str] = {}  # 子の qid → 父の qid
 
     def add_row(entity: Entity, name: str, extra_names: tuple[str, ...] = ()) -> None:
+        entities[entity.qid] = entity
         alt = [n for n in dict.fromkeys((*entity.names, *extra_names)) if n != name]
         rows[entity.qid] = {
             "Horse": name,
             "AltNames": "|".join(alt),
             "Father": "",
+            "FatherQid": "",
             "BirthYear": str(entity.birth_year or ""),
             "Source": WIKIDATA + entity.qid,
         }
@@ -198,6 +204,8 @@ def fetch_horses(
                     continue
             if father is None:
                 continue
+            father_of[child.qid] = father.qid
+            rows[child.qid]["FatherQid"] = father.qid
             hit = existing_for(father)
             if hit is not None:
                 names_by_qid[father.qid] = hit.name
@@ -210,13 +218,60 @@ def fetch_horses(
         log(f"  祖先 {depth + 1} 代目: 新規 {len(next_frontier)} 頭")
         frontier = next_frontier
 
-    # 3. 既存の馬の生年（と父の照合用の情報）
+    # 3. 表記：日本で登録された馬（日本の G1 勝ち馬、日本で供用された種牡馬、日本で調教された競走馬）は
+    #    カナ、それ以外は英字。種牡馬・競走馬かどうかは日本語版 Wikipedia のカテゴリで判定する
+    winner_qids = {e.qid for e in winners.values()}
+    ancestors = {qid: e for qid, e in entities.items() if qid not in winner_qids}
+    categories = client.jawiki_categories([e.jawiki for e in ancestors.values() if e.jawiki], JAPAN_CATEGORIES)
+    renamed: dict[str, str] = {}
+    for qid, entity in ancestors.items():
+        registered = bool(entity.jawiki and categories.get(entity.jawiki))
+        name = display_name(entity, qid) if registered else clean_name(entity.en or entity.ja or qid)
+        old = rows[qid]["Horse"]
+        if name != old:
+            alt = [n for n in dict.fromkeys((old, *rows[qid]["AltNames"].split("|"))) if n and n != name]
+            rows[qid]["Horse"], rows[qid]["AltNames"] = name, "|".join(alt)
+            renamed[old] = name
+    for row in rows.values():
+        row["Father"] = renamed.get(row["Father"], row["Father"])
+    katakana = sum(1 for qid in ancestors if not rows[qid]["Horse"].isascii())
+    log(f"表記：カナ {katakana} 頭 / 英字 {len(ancestors) - katakana} 頭")
+
+    # 4. 既存の馬の生年（と父の照合用の情報）
+    #    Q 番号が分かっている馬はそれで引く。名前で引いた馬は父が既存データと合うか確かめ、
+    #    合わなければ同名の別の馬を検索して、父が合うものを使う（なければ使わない）。
     if include_existing:
-        targets = {h.name: None for h in ds.horses.values() if h.id != ORIGIN_ID}
-        log(f"既存の馬の生年を検索: {len(targets)} 頭")
-        found = resolver.resolve(targets)
-        log(f"  Wikidata で見つかった馬: {len(found)} 頭")
-        fathers = wikidata.by_ids([e.father for e in found.values() if e.father])
+        known = {h.name: h.wikidata for h in ds.horses.values() if h.id != ORIGIN_ID and h.wikidata}
+        by_qid = wikidata.by_ids(list(known.values()))
+        found: dict[str, Entity] = {name: by_qid[q] for name, q in known.items() if by_qid.get(q)}
+        targets = {h.name: None for h in ds.horses.values() if h.id != ORIGIN_ID and h.name not in known}
+        log(f"既存の馬の生年を検索: {len(targets)} 頭（Q 番号で取得 {len(found)} 頭）")
+        by_name = resolver.resolve(targets)
+        by_name_horse = {h.name: h for h in ds.horses.values()}
+
+        def father_matches(horse, entity: Entity, fathers: dict[str, Entity | None]) -> bool | None:
+            expected = ds.horses.get(horse.father_id)
+            if expected is None or expected.id == ORIGIN_ID or not entity.father:
+                return None  # 照合できない
+            father = fathers.get(entity.father)
+            return father is not None and normalize(expected.name) in map(normalize, father.names)
+
+        fathers = wikidata.by_ids([e.father for e in by_name.values() if e.father])
+        replaced = 0
+        for name, entity in by_name.items():
+            horse = by_name_horse[name]
+            if father_matches(horse, entity, fathers) is False:
+                candidates = [c for c in wikidata.search(clean_name(name)) if c.qid != entity.qid]
+                cand_fathers = wikidata.by_ids([c.father for c in candidates if c.father])
+                good = [c for c in candidates if father_matches(horse, c, cand_fathers)]
+                if len(good) == 1:
+                    entity = good[0]
+                    fathers.update(cand_fathers)
+                    replaced += 1
+            found[name] = entity
+        log(f"  Wikidata で見つかった馬: {len(found)} 頭（同名の別の馬から選び直し {replaced} 頭）")
+
+        fathers.update(wikidata.by_ids([e.father for e in found.values() if e.father and e.father not in fathers]))
         for name, entity in found.items():
             if entity.qid in rows:
                 continue
@@ -225,6 +280,7 @@ def fetch_horses(
             if father is not None:
                 hit = existing_for(father)
                 rows[entity.qid]["Father"] = hit.name if hit else display_name(father, father.qid)
+                rows[entity.qid]["FatherQid"] = father.qid
 
     # 父の行を先に（確認しやすいよう、名前順）
     return sorted(rows.values(), key=lambda r: r["Horse"])
@@ -234,7 +290,7 @@ def write_horses(rows: list[dict[str, str]], staging_dir: Path) -> Path:
     path = staging_dir / HORSES_RAW_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["Horse", "AltNames", "Father", "BirthYear", "Source"], lineterminator="\n")
+        writer = csv.DictWriter(f, fieldnames=["Horse", "AltNames", "Father", "FatherQid", "BirthYear", "Source"], lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     return path

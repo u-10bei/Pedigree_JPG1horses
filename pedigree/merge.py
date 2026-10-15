@@ -18,7 +18,7 @@ import unicodedata
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
-from .models import Dataset, Horse, RaceWin
+from .models import ORIGIN_ID, Dataset, Horse, RaceWin
 from .validate import MIN_RACE_AGE, Issue, validate
 
 STAGING_DIR = Path(__file__).resolve().parent.parent / "staging"
@@ -33,8 +33,9 @@ KIND_BIRTH_YEAR = "birth_year"
 KIND_WIN = "win"
 KIND_CHECK = "check"  # 参考情報。反映はしない
 
-# 「エルコンドルパサー (USA)」「ハーツクライ (競走馬)」などの末尾の付記を取り除く
-_SUFFIX = re.compile(r"[(（][^()（）]{1,10}[)）]$")
+# 「エルコンドルパサー (USA)」「ハーツクライ (競走馬)」などの末尾の付記を取り除く。
+# ただし同名の馬を区別するための生年（「Pharamond (1925)」）は残す
+_SUFFIX = re.compile(r"[(（](?!\d{4}[)）])[^()（）]{1,10}[)）]$")
 
 
 # 古い表記（「ガヴアナー」「ヒカリデユール」）と現代の表記を同一視するため、小書きの仮名を並字にそろえる
@@ -60,6 +61,7 @@ class ReviewRow:
     BirthYear: str = ""
     Note: str = ""
     Source: str = ""
+    AltNames: str = ""  # 別表記（"|" 区切り）。表記を選び直すときの参考
 
 
 REVIEW_COLUMNS = [f.name for f in fields(ReviewRow)]
@@ -72,6 +74,11 @@ class RawHorse:
     father: str | None
     birth_year: int | None
     source: str
+    father_qid: str | None = None  # 父の Wikidata の Q 番号（同名の馬と区別するため）
+
+    @property
+    def qid(self) -> str | None:
+        return self.source.split(":", 1)[1] if self.source.startswith("wikidata:") else None
 
 
 @dataclass(frozen=True)
@@ -104,38 +111,87 @@ def load_raw(staging_dir: Path = STAGING_DIR) -> tuple[list[RawWin], list[RawHor
                 father=(r.get("Father") or "").strip() or None,
                 birth_year=int(birth) if birth else None,
                 source=r.get("Source", ""),
+                father_qid=(r.get("FatherQid") or "").strip() or None,
             )
         )
     return wins, horses
 
 
 class NameIndex:
-    """表記揺れを吸収して、取得データの馬名を既存または新規の正式名に解決する。"""
+    """表記揺れを吸収して、取得データの馬名を既存または新規の正式名に解決する。
+
+    Wikidata の Q 番号が分かっている場合はそれを優先する。名前が同じでも、Q 番号や父が
+    既存の馬と食い違う場合は同名の別の馬とみなし、馬名に生年を付けて区別する。
+    """
 
     def __init__(self, ds: Dataset, raw_horses: list[RawHorse]):
         self.existing: dict[str, Horse] = {}
         for h in ds.horses.values():
             self.existing.setdefault(normalize(h.name), h)
+        existing_by_qid = {h.wikidata: h for h in ds.horses.values() if h.wikidata}
 
-        # 取得データの別表記が既存馬に一致すれば、その馬として扱う
-        self.alias: dict[str, str] = {}
-        self.raw: dict[str, RawHorse] = {}
-        for rh in raw_horses:
-            canonical = rh.name
+        def by_name(rh: RawHorse) -> Horse | None:
             for candidate in (rh.name, *rh.alt_names):
                 hit = self.existing.get(normalize(candidate))
                 if hit is not None:
-                    canonical = hit.name
-                    break
-            for candidate in (rh.name, *rh.alt_names):
-                self.alias.setdefault(normalize(candidate), canonical)
+                    return hit
+            return None
+
+        # 1 回目：Q 番号、なければ名前で既存の馬に対応付ける
+        self.match: list[Horse | None] = []  # raw_horses と同じ順
+        self.same_name: list[Horse | None] = []  # 同名だが別の馬と判断した既存馬
+        for rh in raw_horses:
+            hit = existing_by_qid.get(rh.qid) if rh.qid else None
+            clash = None
+            if hit is None:
+                hit = by_name(rh)
+                if hit is not None and hit.wikidata and rh.qid and hit.wikidata != rh.qid:
+                    hit, clash = None, hit
+            self.match.append(hit)
+            self.same_name.append(clash)
+
+        # 2 回目：父が既存の馬の父と食い違うものも、同名の別の馬とみなす
+        qid_to_existing = {rh.qid: hit for rh, hit in zip(raw_horses, self.match) if rh.qid and hit}
+        for i, rh in enumerate(raw_horses):
+            hit = self.match[i]
+            if hit is None or hit.id == ORIGIN_ID or (hit.wikidata and hit.wikidata == rh.qid):
+                continue
+            father = qid_to_existing.get(rh.father_qid) if rh.father_qid else None
+            if father is None and rh.father:
+                father = self.existing.get(normalize(rh.father))
+            if father is not None and father.id != hit.father_id:
+                self.match[i], self.same_name[i] = None, hit
+
+        self.alias: dict[str, str] = {}
+        self.raw: dict[str, RawHorse] = {}
+        self.by_qid: dict[str, str] = {}  # Q 番号 → 正式名
+        self.clashes: dict[str, Horse] = {}  # 生年を付けた新規名 → 同名の既存馬
+        for rh, hit, clash in zip(raw_horses, self.match, self.same_name):
+            if hit is not None:
+                canonical = hit.name
+            elif clash is not None:
+                canonical = f"{rh.name} ({rh.birth_year or rh.qid or '?'})"
+                self.clashes[canonical] = clash
+            else:
+                canonical = rh.name
+            if clash is None:
+                for candidate in (rh.name, *rh.alt_names):
+                    self.alias.setdefault(normalize(candidate), canonical)
             self.raw.setdefault(normalize(canonical), rh)
+            if rh.qid:
+                self.by_qid[rh.qid] = canonical
 
     def canonical(self, name: str) -> str:
         key = normalize(name)
         if key in self.existing:
             return self.existing[key].name
         return self.alias.get(key, name)
+
+    def father_of(self, rh: RawHorse) -> str:
+        """取得データの父の正式名（Q 番号で引けるならそれを優先）。"""
+        if rh.father_qid and rh.father_qid in self.by_qid:
+            return self.by_qid[rh.father_qid]
+        return self.canonical(rh.father) if rh.father else ""
 
     def existing_horse(self, name: str) -> Horse | None:
         return self.existing.get(normalize(self.canonical(name)))
@@ -167,14 +223,22 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
         row = ReviewRow(
             Kind=KIND_HORSE,
             Horse=name,
-            Father=index.canonical(rh.father) if rh.father else "",
+            Father=index.father_of(rh),
             BirthYear=str(rh.birth_year or ""),
             Source=rh.source,
+            AltNames="|".join(a for a in rh.alt_names if a != name),
         )
         horse_rows[name] = row
-        if not rh.father:
+        if name in index.clashes:
+            clash = index.clashes[name]
+            row.Note = (
+                f"同名の既存の馬（{clash.name}、父 {ds.horses[clash.father_id].name}）とは別の馬と判断し、"
+                "馬名に生年を付けました。同じ馬なら行を削除してください"
+            )
+            propose_horse(row.Father, (*chain, name)) if row.Father else None
+        elif not row.Father:
             row.Note = "父が取得できていません"
-        elif not propose_horse(rh.father, (*chain, name)):
+        elif not propose_horse(row.Father, (*chain, name)):
             row.Note = f"父「{row.Father}」が既存の馬につながりません"
         return not row.Note
 
@@ -210,17 +274,24 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
 
     year_rows = []
     check_rows = []
-    for rh in raw_horses:
-        existing = index.existing_horse(rh.name)
+    for rh, existing, clash in zip(raw_horses, index.match, index.same_name):
+        if clash is not None:
+            check_rows.append(
+                ReviewRow(
+                    Kind=KIND_CHECK,
+                    Horse=clash.name,
+                    Father=index.father_of(rh),
+                    BirthYear=str(rh.birth_year or ""),
+                    Note=f"同名の別の馬（父 {index.father_of(rh) or '不明'}）の情報です。"
+                    f"既存の {clash.name}（父 {ds.horses[clash.father_id].name}）には反映しません",
+                    Source=rh.source,
+                )
+            )
         if existing is None:
             continue
-        father = index.existing_horse(rh.father) if rh.father else None
-        current = ds.horses.get(existing.father_id)
-        father_differs = father is not None and current is not None and father.id != current.id
+        father = index.existing_horse(index.father_of(rh)) if rh.father else None
         note = ""
-        if father_differs:
-            note = "父が既存と異なるため、別の馬の情報の可能性があります"
-        elif rh.father and father is None:
+        if rh.father and father is None:
             note = f"取得した父「{rh.father}」を既存データと照合できません（別の馬の可能性があります）"
         if rh.birth_year is not None and existing.birth_year is None:
             year_rows.append(
@@ -239,16 +310,6 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
                     Horse=existing.name,
                     BirthYear=str(rh.birth_year),
                     Note=f"生年が既存（{existing.birth_year}）と異なります",
-                    Source=rh.source,
-                )
-            )
-        if father_differs:
-            check_rows.append(
-                ReviewRow(
-                    Kind=KIND_CHECK,
-                    Horse=existing.name,
-                    Father=father.name,
-                    Note=f"父が既存（{current.name}）と異なります",
                     Source=rh.source,
                 )
             )
@@ -300,6 +361,10 @@ def remaining_rows(rows: list[ReviewRow]) -> list[ReviewRow]:
     return [r for r in rows if not is_approved(r)]
 
 
+def source_qid(row: ReviewRow) -> str | None:
+    return row.Source.split(":", 1)[1] if row.Source.startswith("wikidata:") else None
+
+
 def apply_review(ds: Dataset, rows: list[ReviewRow]) -> tuple[Dataset, dict[str, int]]:
     """承認された行を反映した新しい Dataset を返す。元の Dataset は変更しない。"""
     approved = [r for r in rows if is_approved(r)]
@@ -330,6 +395,7 @@ def apply_review(ds: Dataset, rows: list[ReviewRow]) -> tuple[Dataset, dict[str,
                     name=r.Horse,
                     father_id=by_name[r.Father].id,
                     birth_year=parse_year(r.BirthYear, r.Horse),
+                    wikidata=source_qid(r),
                 )
                 horses[horse.id] = by_name[horse.name] = horse
                 counts[KIND_HORSE] += 1
@@ -346,7 +412,8 @@ def apply_review(ds: Dataset, rows: list[ReviewRow]) -> tuple[Dataset, dict[str,
             if horse is None:
                 problems.append(f"{r.Horse}: 登録されていない馬です")
                 continue
-            horse = replace(horse, birth_year=parse_year(r.BirthYear, r.Horse))
+            # 生年の出典の Q 番号も記録し、次回からは名前ではなく Q 番号で照合する
+            horse = replace(horse, birth_year=parse_year(r.BirthYear, r.Horse), wikidata=horse.wikidata or source_qid(r))
             horses[horse.id] = by_name[horse.name] = horse
             counts[KIND_BIRTH_YEAR] += 1
         elif r.Kind == KIND_WIN:

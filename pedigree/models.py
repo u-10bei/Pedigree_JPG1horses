@@ -14,6 +14,7 @@ class Horse:
     name: str
     father_id: int
     birth_year: int | None = None
+    wikidata: str | None = None  # Wikidata の Q 番号（同名の馬と区別するため）
 
 
 @dataclass(frozen=True)
