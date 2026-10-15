@@ -146,3 +146,9 @@ def test_review_file_roundtrip(tmp_path, ds):
     path = tmp_path / "review.csv"
     merge.write_review(rows, path)
     assert merge.read_review(path) == rows
+
+
+def test_birth_year_conflicting_with_wins_needs_review(ds):
+    rows = build_review(ds, [], [raw("ディープインパクト", "サンデーサイレンス", 2004)])
+    row = by_kind(rows, merge.KIND_BIRTH_YEAR)[0]
+    assert row.Approve == "" and "勝利年" in row.Note

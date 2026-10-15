@@ -11,7 +11,7 @@ from ..merge import HORSES_RAW_FILE, WINNERS_RAW_FILE, RawWin, normalize
 from ..models import ORIGIN_ID, Dataset
 from .client import Client
 from .wikidata import Entity, Wikidata
-from .wikipedia import parse_winners
+from .wikipedia import parse_infobox_father, parse_winners
 
 JAWIKI = "jawiki:"
 WIKIDATA = "wikidata:"
@@ -154,6 +154,29 @@ def fetch_horses(
             "Source": WIKIDATA + entity.qid,
         }
 
+    def father_from_infobox(child: Entity) -> Entity | str | None:
+        """情報欄の父。Wikidata で見つかればエンティティ、名前しか分からなければ既存名または馬名。"""
+        info = None
+        for lang, title in (("ja", child.jawiki), ("en", child.enwiki)):
+            if title:
+                info = parse_infobox_father(client.wikipedia_html(title, lang))
+                if info is not None:
+                    break
+        if info is None:
+            return None
+        name, title = info
+        hit = existing_names.get(normalize(name))
+        if hit is not None:
+            return hit.name
+        site = "jawiki" if lang == "ja" else "enwiki"
+        if title:
+            for found_title, entity in wikidata.by_titles([title], site):
+                if normalize(found_title or "") == normalize(title) or normalize(name) in map(normalize, entity.names):
+                    return entity
+        # 記事へのリンクがない場合は、名前で Wikidata を探す
+        found = resolver.resolve({name: None})
+        return found.get(name) or clean_name(name)
+
     # 2. 父をたどって既存の馬につながるまで登録する
     frontier: list[Entity] = []
     for name, entity in winners.items():
@@ -165,9 +188,14 @@ def fetch_horses(
         fathers = wikidata.by_ids([e.father for e in frontier if e.father])
         next_frontier = []
         for child in frontier:
-            if not child.father:
-                continue
-            father = fathers.get(child.father)
+            if child.father:
+                father = fathers.get(child.father)
+            else:
+                # Wikidata に父がない場合は、日本語版 Wikipedia の情報欄で補う
+                father = father_from_infobox(child)
+                if isinstance(father, str):
+                    rows[child.qid]["Father"] = father
+                    continue
             if father is None:
                 continue
             hit = existing_for(father)

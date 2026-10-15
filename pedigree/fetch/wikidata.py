@@ -25,6 +25,8 @@ class Entity:
     father: str | None  # Q 番号
     birth_year: int | None
     is_horse: bool
+    jawiki: str | None = None  # 日本語版 Wikipedia の記事名
+    enwiki: str | None = None  # 英語版 Wikipedia の記事名
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -61,6 +63,8 @@ def parse_entity(data: dict) -> Entity | None:
         father=fathers[0] if fathers else None,
         birth_year=birth_year,
         is_horse=bool(classes & HORSE_CLASSES) or (bool(fathers) and HUMAN not in classes and bool(classes)),
+        jawiki=data.get("sitelinks", {}).get("jawiki", {}).get("title"),
+        enwiki=data.get("sitelinks", {}).get("enwiki", {}).get("title"),
     )
 
 

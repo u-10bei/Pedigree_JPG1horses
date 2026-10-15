@@ -19,7 +19,7 @@ from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
 from .models import Dataset, Horse, RaceWin
-from .validate import Issue, validate
+from .validate import MIN_RACE_AGE, Issue, validate
 
 STAGING_DIR = Path(__file__).resolve().parent.parent / "staging"
 WINNERS_RAW_FILE = "winners_raw.csv"
@@ -44,7 +44,9 @@ _SMALL_KANA = str.maketrans("ァィゥェォッャュョヮヵヶ", "アイウ�
 def normalize(name: str) -> str:
     name = unicodedata.normalize("NFKC", name).strip()
     name = _SUFFIX.sub("", name).strip()
-    return re.sub(r"\s+", " ", name).translate(_SMALL_KANA).casefold()
+    # 「Man o' War」と「Man o'War」、「St. Albans」と「St Albans」などを同一視する
+    name = re.sub(r"[\s'’`.\-・]", "", name)
+    return name.translate(_SMALL_KANA).casefold()
 
 
 @dataclass
@@ -250,6 +252,18 @@ def build_review(ds: Dataset, raw_wins: list[RawWin], raw_horses: list[RawHorse]
                     Source=rh.source,
                 )
             )
+
+    # 生年が勝利年と矛盾する（勝利時に 2 歳未満）ものは自動承認しない
+    first_win: dict[str, int] = {}
+    for w in ds.wins:
+        name = ds.horses[w.winner_id].name
+        first_win[name] = min(first_win.get(name, w.year), w.year)
+    for r in win_rows:
+        if r.Kind == KIND_WIN:
+            first_win[r.Horse] = min(first_win.get(r.Horse, int(r.Ryear)), int(r.Ryear))
+    for r in [*horse_rows.values(), *year_rows]:
+        if r.BirthYear and r.Horse in first_win and first_win[r.Horse] - int(r.BirthYear) < MIN_RACE_AGE and not r.Note:
+            r.Note = f"生年が勝利年（{first_win[r.Horse]}年）と合いません"
 
     rows = [*horse_rows.values(), *year_rows, *win_rows, *check_rows]
     for row in rows:

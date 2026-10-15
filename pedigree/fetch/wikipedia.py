@@ -127,3 +127,24 @@ def _winners_in_cell(year: int, cell: Tag) -> list[WinnerCell]:
     # 同着が <br> 区切りのテキストで書かれている場合
     names = [t.strip() for t in cell.get_text("\n").split("\n") if t.strip()]
     return [WinnerCell(year, name, None) for name in names]
+
+
+FATHER_HEADERS = ("父", "Sire")
+
+
+def parse_infobox_father(html: str) -> tuple[str, str | None] | None:
+    """競走馬の記事の情報欄（日本語版の「父」、英語版の「Sire」）から父の (馬名, 記事名) を取り出す。"""
+    soup = BeautifulSoup(html, "html.parser")
+    for box in soup.find_all("table", class_=lambda c: c and "infobox" in c):
+        for tr in box.find_all("tr"):
+            th, td = tr.find("th"), tr.find("td")
+            if th is None or td is None or th.get_text(strip=True) not in FATHER_HEADERS:
+                continue
+            _clean(td)
+            for a in td.find_all("a"):
+                name = a.get_text(strip=True)
+                if name and "#" not in a.get("href", "#"):
+                    return name, _link_title(a)
+            name = td.get_text(" ", strip=True)
+            return (name, None) if name else None
+    return None
