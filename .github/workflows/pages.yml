@@ -1,0 +1,49 @@
+name: Pages
+
+# main に data/・site/・pedigree/ の変更が入ったら、検証して階層図を GitHub Pages に公開する
+on:
+  push:
+    branches: [main]
+    paths:
+      - "data/**"
+      - "site/**"
+      - "pedigree/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: データ検証
+        run: python -m pedigree validate
+      - name: 階層図用の JSON を生成
+        run: python -m pedigree build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
