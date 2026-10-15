@@ -5,6 +5,9 @@
     python -m pedigree fetch horses                Wikidata から父・生年を取得する
     python -m pedigree review     staging の取得データを照合し staging/review.csv を作る
     python -m pedigree apply      review.csv の承認済みの行を data/ に反映する
+    python -m pedigree add horse 馬名 --father 父 [--birth 生年]   馬を 1 頭追加する
+    python -m pedigree add win 年 レース 馬名                      勝利を 1 件追加する
+    python -m pedigree admin      確認画面（Streamlit）を開く
 """
 
 from __future__ import annotations
@@ -64,8 +67,34 @@ def cmd_apply(args: argparse.Namespace) -> int:
         print(f"（確認のみ）新規馬 {counts['horse']} / 生年 {counts['birth_year']} / 勝利 {counts['win']}")
         return 0
     io.save(result, args.data_dir)
+    merge.write_review(merge.remaining_rows(rows), args.staging_dir / merge.REVIEW_FILE)
     print(f"反映しました：新規馬 {counts['horse']} / 生年 {counts['birth_year']} / 勝利 {counts['win']}")
     return 0
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    if args.target == "horse":
+        row = merge.ReviewRow(
+            Approve="y", Kind=merge.KIND_HORSE, Horse=args.name, Father=args.father, BirthYear=args.birth or ""
+        )
+    else:
+        row = merge.ReviewRow(Approve="y", Kind=merge.KIND_WIN, Ryear=args.year, Rtitle=args.race, Horse=args.name)
+    try:
+        result, _ = merge.apply_review(io.load(args.data_dir), [row])
+    except merge.ApplyError as e:
+        for problem in e.problems:
+            print(f"ERROR {problem}", file=sys.stderr)
+        return 1
+    io.save(result, args.data_dir)
+    print("追加しました")
+    return 0
+
+
+def cmd_admin(args: argparse.Namespace) -> int:
+    import subprocess
+
+    app = Path(__file__).with_name("admin_app.py")
+    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app), *args.streamlit_args])
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
@@ -103,6 +132,20 @@ def main(argv: list[str] | None = None) -> int:
     p_apply = sub.add_parser("apply", help="review.csv の承認済みの行を data/ に反映する")
     p_apply.add_argument("--dry-run", action="store_true", help="検証だけして保存しない")
     p_apply.set_defaults(func=cmd_apply)
+    p_add = sub.add_parser("add", help="馬または勝利を 1 件追加する")
+    add_sub = p_add.add_subparsers(dest="target", required=True)
+    p_add_horse = add_sub.add_parser("horse", help="馬を追加する")
+    p_add_horse.add_argument("name")
+    p_add_horse.add_argument("--father", required=True)
+    p_add_horse.add_argument("--birth", help="生年（省略可）")
+    p_add_win = add_sub.add_parser("win", help="勝利を追加する")
+    p_add_win.add_argument("year")
+    p_add_win.add_argument("race")
+    p_add_win.add_argument("name")
+    p_add.set_defaults(func=cmd_add)
+    p_admin = sub.add_parser("admin", help="確認画面（Streamlit）を開く")
+    p_admin.add_argument("streamlit_args", nargs=argparse.REMAINDER)
+    p_admin.set_defaults(func=cmd_admin)
     args = parser.parse_args(argv)
     return args.func(args)
 
