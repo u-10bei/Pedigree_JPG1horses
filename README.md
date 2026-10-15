@@ -15,7 +15,7 @@ Represent the pedigree of a Japanese G1 horse in a hierarchical tree.
 GitHub Codespaces で開くと、必要なものが自動でインストールされます。ローカルで動かす場合は次のとおりです。
 
 ```sh
-pip install -e '.[dev,fetch]'
+pip install -e '.[dev,fetch,admin]'
 python -m pedigree validate   # データの整合性を検証
 pytest                        # テスト
 ```

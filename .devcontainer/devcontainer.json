@@ -1,7 +1,7 @@
 {
   "name": "Pedigree_JPG1horses",
   "image": "mcr.microsoft.com/devcontainers/python:3.12",
-  "postCreateCommand": "pip install -e '.[dev,fetch]'",
+  "postCreateCommand": "pip install -e '.[dev,fetch,admin]'",
   "forwardPorts": [8000, 8501],
   "portsAttributes": {
     "8000": { "label": "図のプレビュー" },

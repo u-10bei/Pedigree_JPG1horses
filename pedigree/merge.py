@@ -291,9 +291,18 @@ class ApplyError(Exception):
         self.problems = problems
 
 
+def is_approved(row: ReviewRow) -> bool:
+    return row.Kind != KIND_CHECK and row.Approve.strip().casefold() in APPROVED
+
+
+def remaining_rows(rows: list[ReviewRow]) -> list[ReviewRow]:
+    """反映後も review.csv に残す行（未承認の行と参考情報）。"""
+    return [r for r in rows if not is_approved(r)]
+
+
 def apply_review(ds: Dataset, rows: list[ReviewRow]) -> tuple[Dataset, dict[str, int]]:
     """承認された行を反映した新しい Dataset を返す。元の Dataset は変更しない。"""
-    approved = [r for r in rows if r.Approve.casefold() in APPROVED and r.Kind != KIND_CHECK]
+    approved = [r for r in rows if is_approved(r)]
     horses = dict(ds.horses)
     wins = list(ds.wins)
     by_name = {h.name: h for h in horses.values()}

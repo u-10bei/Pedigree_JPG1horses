@@ -38,7 +38,23 @@ python -m pedigree review   # → staging/review.csv
   馬名や父を直して承認することもできます。
 - 反映したくない行は `Approve` を空欄にしてください。
 
-## 3. 反映
+### 確認画面
+
+```sh
+python -m pedigree admin
+```
+
+ブラウザで確認画面が開きます（Codespaces ではポート 8501 の転送先を開いてください）。
+
+- **確認**タブ：一覧を種別・要確認・未承認・キーワードで絞り込み、承認・馬名・父・生年を直接修正できます。
+  「出典」のリンクから Wikidata・Wikipedia の元情報を確認できます。
+  「保存」で review.csv に書き戻し、「検証して data/ に反映」で反映します。
+- **手動追加**タブ：取得できなかった馬（父系の途中の外国産馬など）や勝利を追加します。
+- **データ**タブ：現在のデータの件数と検証結果を表示します。
+
+反映した行は review.csv から外れ、未承認の行だけが残ります。
+
+## 3. 反映（コマンドで行う場合）
 
 ```sh
 python -m pedigree apply --dry-run   # 確認だけ
@@ -47,6 +63,13 @@ python -m pedigree validate
 ```
 
 反映後のデータが検証に通らない場合は中止し、`data/` は変更しません。
+
+## 1 件だけ追加する場合
+
+```sh
+python -m pedigree add horse 新しい馬 --father 父の馬名 --birth 2023
+python -m pedigree add win 2026 有馬記念 新しい馬
+```
 
 ## 4. コミット
 
