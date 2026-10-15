@@ -44,4 +44,4 @@ MariaDB + PHP + D3.js 構成を、Python + CSV + 静的サイト（GitHub Pages�
 3. **確認画面と CLI** ✅：確認画面（`python -m pedigree admin`）で絞り込み・修正・承認・反映・手動追加。CLI の `add horse` / `add win`
 4. **追いつきの実行** ✅：2005〜2026 年 10 月の G1 勝ち馬を追加（1,429 頭 / 1,204 勝）
 5. **階層図** ✅：`python -m pedigree build` で `site/data/pedigree.json` を生成し、`site/` の折りたたみツリーで表示
-6. **CI/CD**：GitHub Pages へのデプロイ
+6. **CI/CD** ✅：`main` に `data/`・`site/`・`pedigree/` の変更が入ると、検証して GitHub Pages に公開（`.github/workflows/pages.yml`）

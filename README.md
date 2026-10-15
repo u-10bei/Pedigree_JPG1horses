@@ -3,8 +3,9 @@ Represent the pedigree of a Japanese G1 horse in a hierarchical tree.
 
 日本の G1 勝利馬（J・G1 を除き、1983 年までの旧八大競走、ジャパンカップを含む）の父系を階層図にしています。
 
-> Python への移行中です。計画は [docs/PLAN.md](docs/PLAN.md) を参照してください。
-> 旧構成（MariaDB・PHP・D3.js）は `legacy/` にあります。
+**公開ページ：https://u-10bei.github.io/Pedigree_JPG1horses/**
+
+計画と設計は [docs/PLAN.md](docs/PLAN.md) を参照してください。旧構成（MariaDB・PHP・D3.js）は `legacy/` にあります。
 
 ## データ
 

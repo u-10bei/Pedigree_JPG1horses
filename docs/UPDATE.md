@@ -81,13 +81,17 @@ python -m pedigree add horse 新しい馬 --father 父の馬名 --birth 2023
 python -m pedigree add win 2026 有馬記念 新しい馬
 ```
 
-## 4. コミット
+## 4. コミットと公開
 
 ```sh
+git checkout -b data-2026-autumn
 git add data/
-git commit -m "2026 年の勝ち馬を追加"
-git push
+git commit -m "2026 年秋の G1 勝ち馬を追加"
+git push -u origin data-2026-autumn
 ```
+
+GitHub で PR を作ると CI がデータを検証します。`main` にマージすると、GitHub Actions（Pages）が
+階層図を作り直して公開ページに反映します（数分かかります）。
 
 ## 出典
 
