@@ -123,3 +123,54 @@ def test_manual_add_continues_with_unresolved_father_in_review(dirs):
     at = AppTest.from_file(APP, default_timeout=30).run()
     submit_horse(at, "保留馬の子", "保留馬")  # 保留馬は確認一覧にあるが、まだ父が不明
     assert any("続けて 保留馬 の父を入力" in i.value for i in at.info)
+
+
+def submit_win(at: AppTest, year: int, race: str, horse: str) -> AppTest:
+    next(n for n in at.number_input if n.label == "年").set_value(year)
+    next(s for s in at.selectbox if s.label == "レース").set_value(race)
+    next(s for s in at.selectbox if s.label == "勝ち馬").set_value(horse)
+    return [b for b in at.button if b.label == "追加"][-1].click().run()
+
+
+def test_manual_win_already_registered_is_not_added(dirs):
+    _, staging = dirs
+    before = merge.read_review(staging / merge.REVIEW_FILE)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    submit_win(at, 2005, "東京優駿", "ディープインパクト")  # data/ に登録済み
+    assert any("すでに登録されています" in w.value for w in at.warning)
+    assert merge.read_review(staging / merge.REVIEW_FILE) == before
+
+
+def test_manual_win_in_review_is_approved_not_duplicated(dirs):
+    _, staging = dirs
+    rows = merge.read_review(staging / merge.REVIEW_FILE)
+    rows[1].Approve = ""  # 2024 東京優駿 テスト馬 を未承認にしておく
+    merge.write_review(rows, staging / merge.REVIEW_FILE)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    submit_win(at, 2024, "東京優駿", "テスト馬")
+    wins = [r for r in merge.read_review(staging / merge.REVIEW_FILE) if r.Kind == "win"]
+    assert len(wins) == 1 and wins[0].Approve == "y"
+
+
+def test_manual_registered_horse_sets_birth_year_only(dirs):
+    _, staging = dirs
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    submit_horse(at, "サンデーサイレンス", "Halo")  # 生年なし → 追加しない
+    assert any("すでに登録されています" in w.value for w in at.warning)
+    assert not any(r.Horse == "サンデーサイレンス" for r in merge.read_review(staging / merge.REVIEW_FILE))
+
+    next(t for t in at.text_input if t.label == "馬名").input("サンデーサイレンス")
+    next(t for t in at.text_input if t.label == "生年（空欄可）").input("1986")
+    submit_horse(at, None, "Halo")
+    added = [r for r in merge.read_review(staging / merge.REVIEW_FILE) if r.Horse == "サンデーサイレンス"]
+    assert [(r.Kind, r.BirthYear, r.Approve) for r in added] == [("birth_year", "1986", "y")]
+
+
+def test_marked_rows_are_removed_from_review(dirs):
+    _, staging = dirs
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    df = at.session_state["df"]
+    df.loc[df["馬名"] == "保留馬", "外す"] = True
+    at.run()
+    next(b for b in at.button if b.label.startswith("「外す」にチェックした行を一覧から外す")).click().run()
+    assert "保留馬" not in [r.Horse for r in merge.read_review(staging / merge.REVIEW_FILE)]
