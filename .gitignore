@@ -135,3 +135,6 @@ util/*.env
 # 取得データ・照合結果（Codespaces で生成）
 staging/
 .cache/
+
+# 階層図用に生成される JSON
+site/data/
