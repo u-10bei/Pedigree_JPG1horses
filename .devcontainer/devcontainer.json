@@ -1,0 +1,15 @@
+{
+  "name": "Pedigree_JPG1horses",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "postCreateCommand": "pip install -e '.[dev]'",
+  "forwardPorts": [8000, 8501],
+  "portsAttributes": {
+    "8000": { "label": "図のプレビュー" },
+    "8501": { "label": "確認画面" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "mechatroniks.rainbow-csv"]
+    }
+  }
+}

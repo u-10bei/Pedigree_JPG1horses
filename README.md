@@ -1,7 +1,21 @@
 # Pedigree_JPG1horses
-Represent the pedigree of a Japanese G1 horse in a network graph.
+Represent the pedigree of a Japanese G1 horse in a hierarchical tree.
 
-- Using mariaDB, PHP, axios, vis.js, and javascript, the pedigree of Japan's G1 (including the former eight major races) winning horses is made into a network graph.
-- mariaDB、PHP、D3.js、javascriptを使い、日本のＧ１勝利馬  
-（Ｊ・Ｇ１を除き、１９８３年までの旧八大競走、ジャパンカップを含む）  
-の血統を、階層図にしています。
+日本の G1 勝利馬（J・G1 を除き、1983 年までの旧八大競走、ジャパンカップを含む）の父系を階層図にしています。
+
+> Python への移行中です。計画は [docs/PLAN.md](docs/PLAN.md) を参照してください。
+> 旧構成（MariaDB・PHP・D3.js）は `legacy/` にあります。
+
+## データ
+
+`data/` の CSV が正本です。列の意味は [docs/PLAN.md](docs/PLAN.md#データdata) を参照してください。
+
+## 開発
+
+GitHub Codespaces で開くと、必要なものが自動でインストールされます。ローカルで動かす場合は次のとおりです。
+
+```sh
+pip install -e '.[dev]'
+python -m pedigree validate   # データの整合性を検証
+pytest                        # テスト
+```
