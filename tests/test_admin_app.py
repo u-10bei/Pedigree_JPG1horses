@@ -71,13 +71,55 @@ def test_apply_errors_leave_data_unchanged(dirs):
     assert (data / "pedigree.csv").read_text(encoding="utf-8") == before
 
 
+def submit_horse(at: AppTest, name: str | None, father: str) -> AppTest:
+    if name is not None:
+        next(t for t in at.text_input if t.label == "馬名").input(name)
+    next(s for s in at.selectbox if s.label == "父").set_value(father)
+    return next(b for b in at.button if b.label == "追加").click().run()
+
+
 def test_manual_add_horse(dirs):
     _, staging = dirs
     at = AppTest.from_file(APP, default_timeout=30).run()
-    form_inputs = [t for t in at.text_input if t.label == "馬名"]
-    form_inputs[0].input("手動の馬")
-    next(s for s in at.selectbox if s.label == "父").select("サンデーサイレンス")
-    next(b for b in at.button if b.label == "追加").click().run()
+    submit_horse(at, "手動の馬", "サンデーサイレンス")
     assert not at.exception
     rows = merge.read_review(staging / merge.REVIEW_FILE)
     assert rows[-1] == ReviewRow(Approve="y", Kind="horse", Horse="手動の馬", Father="サンデーサイレンス", Note="手動追加")
+
+
+def test_manual_add_climbs_unregistered_fathers(dirs):
+    data, staging = dirs
+    at = AppTest.from_file(APP, default_timeout=30)
+    # 一覧にない新しい名前は AppTest の selectbox で入力できないので、最初の描画の前に状態を設定する
+    at.session_state["new_name"] = "子馬"
+    at.session_state["new_father"] = "未登録の父"
+    at.run()
+    next(b for b in at.button if b.label == "追加").click().run()
+    assert any("続けて 未登録の父 の父を入力" in i.value for i in at.info)
+    assert next(t for t in at.text_input if t.label == "馬名").value == "未登録の父"
+
+    submit_horse(at, None, "サンデーサイレンス")  # 馬名は案内で入力済み
+    rows = {r.Horse: r for r in merge.read_review(staging / merge.REVIEW_FILE)}
+    assert rows["子馬"].Father == "未登録の父"
+    assert rows["未登録の父"].Father == "サンデーサイレンス"
+
+    button(at, "検証して data/ に反映").click().run()
+    names = io.load(data).by_name()
+    assert names["子馬"].father_id == names["未登録の父"].id
+
+
+def test_manual_add_updates_existing_review_row(dirs):
+    _, staging = dirs
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    next(s for s in at.selectbox if s.label == "まだ既存の馬につながっていない馬から選ぶ").set_value("保留馬").run()
+    assert next(t for t in at.text_input if t.label == "馬名").value == "保留馬"
+    submit_horse(at, None, "Halo")
+    rows = [r for r in merge.read_review(staging / merge.REVIEW_FILE) if r.Horse == "保留馬"]
+    assert len(rows) == 1
+    assert (rows[0].Father, rows[0].Approve, rows[0].Note) == ("Halo", "y", "手動で修正")
+
+
+def test_manual_add_continues_with_unresolved_father_in_review(dirs):
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    submit_horse(at, "保留馬の子", "保留馬")  # 保留馬は確認一覧にあるが、まだ父が不明
+    assert any("続けて 保留馬 の父を入力" in i.value for i in at.info)

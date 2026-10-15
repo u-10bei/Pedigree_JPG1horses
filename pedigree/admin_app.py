@@ -112,7 +112,7 @@ def review_tab() -> None:
         view,
         key=f"editor-{st.session_state.editor_version}",
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=560,
         disabled=[c for c in view.columns if c not in EDITABLE],
         column_order=["承認", "種別", "年", "レース", "馬名", "別表記", "父", "生年", "注記", "リンク"],
@@ -128,18 +128,18 @@ def review_tab() -> None:
     df.loc[edited.index, EDITABLE] = edited[EDITABLE]
 
     col1, col2, col3, col4 = st.columns(4)
-    if col1.button("表示中をすべて承認", use_container_width=True):
+    if col1.button("表示中をすべて承認", width="stretch"):
         df.loc[view.index[view["種別"] != KIND_LABELS[merge.KIND_CHECK]], "承認"] = True
         reset_editor()
         st.rerun()
-    if col2.button("表示中の承認を外す", use_container_width=True):
+    if col2.button("表示中の承認を外す", width="stretch"):
         df.loc[view.index, "承認"] = False
         reset_editor()
         st.rerun()
-    if col3.button("保存", type="secondary", use_container_width=True):
+    if col3.button("保存", type="secondary", width="stretch"):
         save_review()
         st.success(f"{REVIEW_PATH} に保存しました")
-    if col4.button("検証して data/ に反映", type="primary", use_container_width=True):
+    if col4.button("検証して data/ に反映", type="primary", width="stretch"):
         apply(dry_run=False)
 
     if st.button("検証だけする（反映しない）"):
@@ -152,7 +152,7 @@ def apply(dry_run: bool) -> None:
         result, counts = merge.apply_review(io.load(DATA_DIR), rows)
     except merge.ApplyError as e:
         st.error(f"エラーが {len(e.problems)} 件あります。data/ は変更していません。")
-        st.dataframe(pd.DataFrame({"エラー": [str(p) for p in e.problems]}), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame({"エラー": [str(p) for p in e.problems]}), hide_index=True, width="stretch")
         return
     summary = f"新規馬 {counts['horse']} / 生年 {counts['birth_year']} / 勝利 {counts['win']}"
     if dry_run:
@@ -166,27 +166,94 @@ def apply(dry_run: bool) -> None:
     st.success(f"data/ に反映しました（{summary}）。反映した行は確認一覧から外しました。")
 
 
-def manual_tab() -> None:
+def known_names() -> list[str]:
     ds = io.load(DATA_DIR)
     df: pd.DataFrame = st.session_state.df
     pending = df.loc[df["種別"] == KIND_LABELS[merge.KIND_HORSE], "馬名"].tolist()
-    names = sorted({h.name for h in ds.horses.values() if h.id != ORIGIN_ID} | set(pending))
+    return sorted({h.name for h in ds.horses.values() if h.id != ORIGIN_ID} | set(pending))
+
+
+def unresolved_horses() -> list[str]:
+    """確認一覧にある新規馬のうち、まだ既存の馬につながっていないもの（注記あり）。"""
+    df: pd.DataFrame = st.session_state.df
+    rows = df[(df["種別"] == KIND_LABELS[merge.KIND_HORSE]) & ~df["注記"].isin(["", "手動追加", "手動で修正"])]
+    return rows["馬名"].tolist()
+
+
+def submit_horse() -> None:
+    """「馬を追加」の送信。父が未登録なら、続けてその父を入力できるようにする。"""
+    state = st.session_state
+    name = (state.get("new_name") or "").strip()
+    father = (state.get("new_father") or "").strip()
+    birth = (state.get("new_birth") or "").strip()
+    if not name or not father:
+        state.manual_msg = ("error", "馬名と父を入力してください")
+        return
+    if birth and not birth.isdigit():
+        state.manual_msg = ("error", "生年は数字で入力してください")
+        return
+
+    # 父が確認一覧にあっても、まだ既存の馬につながっていなければ続けて入力してもらう
+    father_known = father in known_names() and merge.normalize(father) not in {
+        merge.normalize(n) for n in unresolved_horses()
+    }
+    upsert_horse(name, father, birth)
+    if father_known:
+        state.manual_msg = ("success", f"{name}（父 {father}）を追加しました")
+        state.new_name = ""
+    else:
+        state.manual_msg = ("info", f"{name}（父 {father}）を追加しました。父「{father}」は未登録です。続けて {father} の父を入力してください。")
+        state.new_name = father
+    state.new_father = None
+    state.new_birth = ""
+
+
+def upsert_horse(name: str, father: str, birth: str) -> None:
+    """確認一覧に同じ馬の新規行があれば更新し、なければ追加する。"""
+    df: pd.DataFrame = st.session_state.df
+    same = df.index[(df["種別"] == KIND_LABELS[merge.KIND_HORSE]) & (df["馬名"].map(merge.normalize) == merge.normalize(name))]
+    if len(same):
+        df.loc[same, ["父", "承認", "注記"]] = [father, True, "手動で修正"]
+        if birth:
+            df.loc[same, "生年"] = birth
+        save_review()
+        reset_editor()
+    else:
+        add_row(merge.ReviewRow(Approve="y", Kind=merge.KIND_HORSE, Horse=name, Father=father, BirthYear=birth, Note="手動追加"))
+
+
+def manual_tab() -> None:
+    ds = io.load(DATA_DIR)
+    names = known_names()
 
     st.write("追加した行は確認一覧に「承認済み」で入ります。反映は「確認」タブから行ってください。")
     left, right = st.columns(2)
-    with left, st.form("add-horse", clear_on_submit=True):
+    with left:
         st.subheader("馬を追加")
-        name = st.text_input("馬名")
-        father = st.selectbox("父", names, index=None, placeholder="名前を入力して選択")
-        birth = st.text_input("生年（空欄可）")
-        if st.form_submit_button("追加"):
-            if not name or not father:
-                st.error("馬名と父を入力してください")
-            elif birth and not birth.isdigit():
-                st.error("生年は数字で入力してください")
-            else:
-                add_row(merge.ReviewRow(Approve="y", Kind=merge.KIND_HORSE, Horse=name, Father=father, BirthYear=birth, Note="手動追加"))
-                st.success(f"{name} を追加しました")
+        st.caption("父が未登録の場合は新しい名前を入力できます。その場合、続けてその父を入力するよう案内します（既存の馬につながるまで繰り返せます）。")
+        unresolved = unresolved_horses()
+        if unresolved:
+            pick = st.selectbox(
+                "まだ既存の馬につながっていない馬から選ぶ",
+                unresolved,
+                index=None,
+                placeholder=f"{len(unresolved)} 頭（選ぶと下の馬名に入ります）",
+                key="pick_unresolved",
+            )
+            if pick and st.session_state.get("new_name") != pick and st.session_state.get("_picked") != pick:
+                st.session_state.new_name = pick
+                st.session_state._picked = pick
+        message = st.session_state.pop("manual_msg", None)
+        if message:
+            getattr(st, message[0])(message[1])
+        with st.form("add-horse"):
+            st.text_input("馬名", key="new_name")
+            typed = st.session_state.get("new_father")
+            options = names + [typed] if typed and typed not in names else names
+            st.selectbox("父", options, index=None, placeholder="名前を入力して選択（新しい名前も可）", accept_new_options=True, key="new_father")
+            st.text_input("生年（空欄可）", key="new_birth")
+            st.form_submit_button("追加", on_click=submit_horse)
+
     with right, st.form("add-win", clear_on_submit=True):
         st.subheader("勝利を追加")
         year = st.number_input("年", min_value=1932, max_value=2100, value=None, step=1)
