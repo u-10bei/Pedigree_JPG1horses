@@ -175,3 +175,23 @@ def test_marked_rows_are_removed_from_review(dirs):
     at.run()
     next(b for b in at.button if b.label.startswith("「外す」にチェックした行を一覧から外す")).click().run()
     assert "保留馬" not in [r.Horse for r in merge.read_review(staging / merge.REVIEW_FILE)]
+
+
+def test_births_tab_lists_horses_without_birth_year(dirs):
+    data, _ = dirs
+    blank = sum(1 for h in io.load(data).horses.values() if h.id != 0 and h.birth_year is None)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    assert any(f"空欄 {blank} 頭" in c.value for c in at.caption)
+
+
+def test_paste_birth_years(dirs):
+    data, staging = dirs
+    blank = next(h for h in io.load(data).horses.values() if h.id != 0 and h.birth_year is None)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    next(t for t in at.text_area if t.label == "貼り付け").input(f"{blank.name}\t1800\n架空の馬 1900").run()
+    preview = next(d for d in at.dataframe if "貼り付けた行" in d.value.columns).value
+    assert list(preview["対応する馬"]) == [blank.name, ""]
+    next(b for b in at.button if b.label.startswith("対応できた")).click().run()
+    rows = [r for r in merge.read_review(staging / merge.REVIEW_FILE) if r.Kind == "birth_year"]
+    assert [(r.Horse, r.BirthYear, r.Approve) for r in rows] == [(blank.name, "1800", "y")]
